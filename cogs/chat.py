@@ -1,80 +1,84 @@
 import os
 import logging
-import aiohttp
+import asyncio
 from discord.ext import commands
 
 from utilities import *
-
-# define the request data as a Python dictionary
-request_data = {
-    "prompt": "",
-    "temperature": 0.5,
-    "top_p": 0.9
-}
-
-# save chat history globally
-context = []
-
-# message queue
-chat_queue = asyncio.Queue()
+from util.Chat.local import LocalBackend
+from util.Chat.gemini import GeminiBackend
 
 
 class Chat(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.backend = GeminiBackend(
+            api_key="gg-gcli-kf0L00pj2hUGCkdTmLIDVjEr_qEmvDi0E719sPnpXGE",
+            proxy_url="https://gcli.ggchan.dev/",
+            bot_name=Config().bot_name
+        )
+        self.chat_queue = asyncio.Queue()
+        self.processing_task = None
 
     @commands.Cog.listener()
     async def on_ready(self):
         print(f"{os.path.basename(__file__)} is ready.")
 
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        if message.author == self.bot.user:
+            return  # ignore bot's own response
+
+        if self.bot.user in message.mentions:
+            ctx = await self.bot.get_context(message)
+            await self.chat(ctx, message=message.content)
+
     @commands.command(aliases=['说话'], help="chats with user")
     async def chat(self, ctx, *, message):
-        new_message = {'role': ctx.author.nick or ctx.author.name, 'content': message}
-        params = {'temperature': Config().temperature, 'top_p': Config().top_p, 'top_k': Config().top_k,
-                  'max_new_tokens': Config().max_new_tokens}
-        await manage_context(new_message)
-        await chat_queue.put((context.copy(), params, ctx))
-        if chat_queue.qsize() == 1:
-            self.bot.loop.create_task(process_chat_queue())
+        params = {
+            'temperature': Config().temperature, 
+            'top_p': Config().top_p, 
+            'top_k': Config().top_k,
+            'max_new_tokens': Config().max_new_tokens,
+            'author_name': ctx.author.nick or ctx.author.name
+        }
+        await self.chat_queue.put((message, params, ctx))
+        
+        if self.processing_task is None or self.processing_task.done():
+            self.processing_task = self.bot.loop.create_task(self.process_chat_queue())
+
+    async def process_chat_queue(self):
+        while not self.chat_queue.empty():
+            message, params, ctx = await self.chat_queue.get()
+            try:
+                async with ctx.typing():
+                    response = await self.backend.generate_reply(message, **params)
+                    await try_reply(ctx, response)
+            except Exception as e:
+                logging.error(f"Chat Error: {repr(e)}", exc_info=True)
+                await try_reply(ctx, f"Error: {str(e)}")
 
     @commands.command(aliases=['清空', "忘记一切"], help="clears chat history")
     async def reset_chat(self, ctx):
-        global context
-        context = []
+        self.backend.reset_context()
         await try_reply(ctx, "阿巴阿巴! 我忘记了一切!")
 
-
-async def manage_context(new_message):
-    global context
-    context.append(new_message)
-    if len(context) > 20:
-        context.pop(0)
-
-
-async def process_chat_queue():
-    while not chat_queue.empty():
-        curr_context, params, ctx = await chat_queue.get()
-        try:
-            await chat_with_bot(curr_context, params, ctx)
-        except Exception as e:
-            logging.error(f"Chat Error: {repr(e)}", exc_info=True)
-
-
-async def chat_with_bot(curr_context, params, ctx):
-    async with aiohttp.ClientSession() as session:
-        cleaned_sys_prompt = Config().system_prompt.replace("{{char}}", Config().bot_name).replace("{{user}}",
-                                                                                                   ctx.author.nick or ctx.author.name)
-        curr_context_with_system_prompt = [{'role': 'system', 'content': cleaned_sys_prompt}] + curr_context
-        params['context'] = curr_context_with_system_prompt
-        async with session.post(Config().api_url, json=params) as response:
-            if response.status == 200:
-                response_data = await response.json()
-                response = {'role': Config().bot_name, 'content': response_data['response']}
-                await manage_context(response)
-                await try_reply(ctx, response_data['response'])
-            else:
-                raise Exception("Error fetching chat response. Status code: " + str(response.status))
-
+    @commands.command(name="switch_backend")
+    async def switch_backend(self, ctx, backend_name: str):
+        if backend_name.lower() == "gemini":
+            # Note: You should move these keys to your Config
+            self.backend = GeminiBackend(
+                api_key="gg-gcli-kf0L00pj2hUGCkdTmLIDVjEr_qEmvDi0E719sPnpXGE",
+                proxy_url="https://gcli.ggchan.dev/",
+                bot_name=Config().bot_name
+            )
+            await try_reply(ctx, "Switched to Gemini Backend.")
+        else:
+            self.backend = LocalBackend(
+                api_url=Config().api_url,
+                system_prompt=Config().system_prompt,
+                bot_name=Config().bot_name
+            )
+            await try_reply(ctx, "Switched to Local Backend.")
 
 async def setup(bot):
     await bot.add_cog(Chat(bot))

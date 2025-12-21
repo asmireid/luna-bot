@@ -25,14 +25,14 @@ class ChatOpenAI(commands.Cog):
     async def on_ready(self):
         print(f"{os.path.basename(__file__)} is ready.")
 
-    @commands.Cog.listener()
-    async def on_message(self, message):
-        if message.author == self.bot.user:
-            return  # ignore bot's own response
+    # @commands.Cog.listener()
+    # async def on_message(self, message):
+    #     if message.author == self.bot.user:
+    #         return  # ignore bot's own response
 
-        if self.bot.user in message.mentions:
-            ctx = await self.bot.get_context(message)
-            await self.chat_openai(ctx, message=message.content)
+    #     if self.bot.user in message.mentions:
+    #         ctx = await self.bot.get_context(message)
+    #         await self.chat_openai(ctx, message=message.content)
 
     @commands.command(help="chats with user")
     async def chat_openai(self, ctx, *, message):
