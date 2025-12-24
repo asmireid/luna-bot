@@ -2,29 +2,33 @@ import aiohttp
 from .base import ChatBackend
 
 class LocalBackend(ChatBackend):
-    def __init__(self, api_url: str, system_prompt: str, bot_name: str):
-        super().__init__(system_prompt)
+    def __init__(self, api_url: str,
+                context_limit: int,
+                system_prompt: str = None,
+                bot_name: str = "Luna"):
+        super().__init__(context_limit, system_prompt=system_prompt)
         self.api_url = api_url
         self.bot_name = bot_name
 
     async def generate_reply(self, message: str, **kwargs) -> str:
         author_name = kwargs.get('author_name', 'User')
-        self.add_context(author_name, message)
-        
-        system_instruction_template = None
-        history_context = []
-        for msg in self.context:
-            if msg['role'] == 'system':
-                system_instruction_template = msg['content']
-                continue
-            history_context.append(msg)
+        self.add_context('user', message, author_name)
+
+        system_instruction = self.system_prompt
 
         api_context = []
-        if system_instruction_template:
-            cleaned_sys_prompt = system_instruction_template.replace("{{char}}", self.bot_name).replace("{{user}}", author_name)
+        if system_instruction:
+            cleaned_sys_prompt = (system_instruction
+                                .replace("{{char}}", self.bot_name)
+                                .replace("{{user}}", author_name))
             api_context.append({'role': 'system', 'content': cleaned_sys_prompt})
-        
-        api_context.extend(history_context)
+
+        for msg in self.context:
+            content = {
+                'role': msg['role'],
+                'content': f"from {msg['name']}: {msg['content']}"
+            }
+            api_context.append(content)
         
         params = kwargs.get('params', {})
         payload = params.copy()
@@ -35,7 +39,7 @@ class LocalBackend(ChatBackend):
                 if response.status == 200:
                     response_data = await response.json()
                     reply = response_data['response']
-                    self.add_context(self.bot_name, reply)
+                    self.add_context('assistant', reply, self.bot_name)
                     return reply
                 else:
                     raise Exception(f"Error fetching chat response. Status code: {response.status}")
