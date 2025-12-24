@@ -9,4 +9,5 @@ util/main.py
 util/prompt_gen.py
 /cache
 run.bat
-*.txt
+*/.DS_Store
+.DS_Store
