@@ -9,3 +9,4 @@ util/main.py
 util/prompt_gen.py
 /cache
 run.bat
+*.txt

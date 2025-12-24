@@ -2,6 +2,7 @@ import os
 import logging
 import asyncio
 from discord.ext import commands
+from config.config import Config
 
 from utilities import *
 from util.Chat.local import LocalBackend
@@ -12,8 +13,10 @@ class Chat(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.backend = GeminiBackend(
-            api_key="gg-gcli-kf0L00pj2hUGCkdTmLIDVjEr_qEmvDi0E719sPnpXGE",
-            proxy_url="https://gcli.ggchan.dev/",
+            api_key=Config().gemini_api_key,
+            system_prompt=Config().system_prompt,
+            proxy_url=Config().gemini_proxy_url,
+            model=Config().model,
             bot_name=Config().bot_name
         )
         self.chat_queue = asyncio.Queue()
@@ -65,10 +68,11 @@ class Chat(commands.Cog):
     @commands.command(name="switch_backend")
     async def switch_backend(self, ctx, backend_name: str):
         if backend_name.lower() == "gemini":
-            # Note: You should move these keys to your Config
             self.backend = GeminiBackend(
-                api_key="gg-gcli-kf0L00pj2hUGCkdTmLIDVjEr_qEmvDi0E719sPnpXGE",
-                proxy_url="https://gcli.ggchan.dev/",
+                api_key=Config().gemini_api_key,
+                system_prompt=Config().system_prompt,
+                proxy_url=Config().gemini_proxy_url,
+                model=Config().model,
                 bot_name=Config().bot_name
             )
             await try_reply(ctx, "Switched to Gemini Backend.")

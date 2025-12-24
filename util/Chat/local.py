@@ -3,18 +3,28 @@ from .base import ChatBackend
 
 class LocalBackend(ChatBackend):
     def __init__(self, api_url: str, system_prompt: str, bot_name: str):
-        super().__init__()
+        super().__init__(system_prompt)
         self.api_url = api_url
-        self.system_prompt = system_prompt
         self.bot_name = bot_name
 
     async def generate_reply(self, message: str, **kwargs) -> str:
         author_name = kwargs.get('author_name', 'User')
         self.add_context(author_name, message)
         
-        cleaned_sys_prompt = self.system_prompt.replace("{{char}}", self.bot_name).replace("{{user}}", author_name)
-        # Prepend system prompt to the context sent to API
-        api_context = [{'role': 'system', 'content': cleaned_sys_prompt}] + self.context
+        system_instruction_template = None
+        history_context = []
+        for msg in self.context:
+            if msg['role'] == 'system':
+                system_instruction_template = msg['content']
+                continue
+            history_context.append(msg)
+
+        api_context = []
+        if system_instruction_template:
+            cleaned_sys_prompt = system_instruction_template.replace("{{char}}", self.bot_name).replace("{{user}}", author_name)
+            api_context.append({'role': 'system', 'content': cleaned_sys_prompt})
+        
+        api_context.extend(history_context)
         
         params = kwargs.get('params', {})
         payload = params.copy()
