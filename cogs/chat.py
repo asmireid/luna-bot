@@ -57,7 +57,7 @@ class Chat(commands.Cog):
 
         if self.bot.user in message.mentions:
             ctx = await self.bot.get_context(message)
-            cleaned = message.content.replace(self.bot.user.mention, "").strip()
+            cleaned = message.clean_content.replace(f"@{Config().bot_name}", "").strip()
             await self.chat(ctx, message=cleaned)
 
     @commands.command(aliases=['说话'], help="chats with user")
