@@ -16,35 +16,8 @@ class Chat(commands.Cog):
         self.chat_queue = asyncio.Queue()
         self.processing_task = None
 
-        backend = Config().chat_backend.lower()
-        if backend == "gemini":
-            self.backend = GeminiBackend(
-                api_key=Config().gemini_api_key,
-                proxy_url=Config().gemini_proxy_url,
-                model=Config().model,
-                system_prompt=Config().system_prompt,
-                context_limit=Config().context_limit,
-                bot_name=Config().bot_name
-            )
-            print("Chat initialized with Gemini Backend.")
-        elif backend == "openai" or "openai-like" or "deepseek":
-            self.backend = OpenAILikeBackend(
-                api_key=Config().openai_like_api_key,
-                base_url=Config().openai_like_base_url,
-                model=Config().model,
-                system_prompt=Config().system_prompt,
-                context_limit=Config().context_limit,
-                bot_name=Config().bot_name
-            )
-            print("Chat initialized with OpenAI-like Backend.")
-        else:
-            self.backend = LocalBackend(
-                api_url=Config().local_api_url,
-                system_prompt=Config().system_prompt,
-                context_limit=Config().context_limit,
-                bot_name=Config().bot_name
-            )
-            print("Chat initialized with Local Backend.")
+        self.switch_backend(Config().chat_backend)
+        print(f"Chat initialized with {Config().chat_backend.capitalize()} Backend.")
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -80,7 +53,7 @@ class Chat(commands.Cog):
             message, params, ctx = await self.chat_queue.get()
             try:
                 async with ctx.typing():
-                    response = await self.backend.generate_reply(message, **params)
+                    response = await self.backend.chat(message, **params)
                     await try_reply(ctx, response)
             except Exception as e:
                 logging.error(f"Chat Error: {repr(e)}", exc_info=True)
@@ -93,9 +66,9 @@ class Chat(commands.Cog):
 
     @commands.command(help="displays the context")
     async def display_context(self, ctx):
-        if not self.backend.context:
-            await try_reply(ctx, f"No context yet.")
-            return
+        # if not self.backend.context:
+        #     await try_reply(ctx, f"No context yet.")
+        #     return
 
         msg_embed = make_embed(ctx, title=f"{Config().bot_name}'s Chat", descr=f"Displaying stored context.")
         for m in self.backend.context:
@@ -106,43 +79,49 @@ class Chat(commands.Cog):
                 content = content[:1021] + "..."
             msg_embed.add_field(name=name, value=content, inline=False)
 
+        msg_embed.add_field(name="Memory", value=self.backend.memory, inline=False)
+
         await try_reply(ctx, msg_embed)
 
     @commands.command(name="switch_backend")
     async def switch_backend(self, ctx, backend_name: str):
         name = backend_name.lower()
-
+        self.switch_backend(name)
+        await try_reply(ctx, f"Switched to {backend_name.capitalize()} Backend.")
+    
+    def switch_backend(self, backend_name: str):
+        name = backend_name.lower()
         if name == "gemini":
             self.backend = GeminiBackend(
                 api_key=Config().gemini_api_key,
                 proxy_url=Config().gemini_proxy_url,
                 model=Config().model,
                 system_prompt=Config().system_prompt,
+                summarize_prompt= Config().summarize_prompt,
                 context_limit=Config().context_limit,
+                context_keep=Config().context_keep,
                 bot_name=Config().bot_name
             )
-            await try_reply(ctx, "Switched to Gemini Backend.")
-
         elif name == "openai" or "openai-like" or "deepseek":
             self.backend = OpenAILikeBackend(
                 api_key=Config().openai_like_api_key,
                 base_url=Config().openai_like_base_url,
                 model=Config().model,
                 system_prompt=Config().system_prompt,
+                summarize_prompt= Config().summarize_prompt,
                 context_limit=Config().context_limit,
+                context_keep=Config().context_keep,
                 bot_name=Config().bot_name
             )
-            await try_reply(ctx, "Switched to OpenAI-like Backend.")
-
         else:
             self.backend = LocalBackend(
                 api_url=Config().local_api_url,
                 system_prompt=Config().system_prompt,
+                summarize_prompt= Config().summarize_prompt,
                 context_limit=Config().context_limit,
+                context_keep=Config().context_keep,
                 bot_name=Config().bot_name
             )
-            await try_reply(ctx, "Switched to Local Backend.")
-
 
 async def setup(bot):
     await bot.add_cog(Chat(bot))

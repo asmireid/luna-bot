@@ -1,4 +1,5 @@
 import aiohttp
+from typing import List, Dict, Optional
 from .base import ChatBackend
 
 class LocalBackend(ChatBackend):
@@ -10,9 +11,9 @@ class LocalBackend(ChatBackend):
         self.api_url = api_url
         self.bot_name = bot_name
 
-    async def generate_reply(self, message: str, **kwargs) -> str:
-        author_name = kwargs.get('author_name', 'User')
-        self.add_context('user', message, author_name)
+    async def _generate_reply(self, context: Optional[List[Dict[str, str]]] = None, **kwargs) -> str:
+        # author_name = kwargs.get('author_name', 'User')
+        # self.add_context('user', message, author_name)
 
         system_instruction = self.system_prompt
 
@@ -23,7 +24,8 @@ class LocalBackend(ChatBackend):
                                 .replace("{{user}}", author_name))
             api_context.append({'role': 'system', 'content': cleaned_sys_prompt})
 
-        for msg in self.context:
+        ctx = context if context is not None else self.context
+        for msg in ctx:
             content = {
                 'role': msg['role'],
                 'content': f"from {msg['name']}: {msg['content']}"
@@ -39,7 +41,7 @@ class LocalBackend(ChatBackend):
                 if response.status == 200:
                     response_data = await response.json()
                     reply = response_data['response']
-                    self.add_context('assistant', reply, self.bot_name)
+                    # self.add_context('assistant', reply, self.bot_name)
                     return reply
                 else:
                     raise Exception(f"Error fetching chat response. Status code: {response.status}")

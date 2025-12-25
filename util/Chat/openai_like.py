@@ -1,4 +1,5 @@
 import asyncio
+from typing import List, Dict, Optional
 from openai import OpenAI
 from .base import ChatBackend
 
@@ -14,19 +15,20 @@ class OpenAILikeBackend(ChatBackend):
         self.model = model
         self.bot_name = bot_name
 
-    async def generate_reply(self, message: str, **kwargs) -> str:
-        author_name = kwargs.get("author_name", "User")
-        self.add_context('user', message, author_name)
-        # print(self.context[-1])
+    async def _generate_reply(self, context: Optional[List[Dict[str, str]]] = None, **kwargs) -> str:
 
         messages = []
         system_instruction = self.system_prompt
         if system_instruction:
             messages.append({"role": "system", "content": system_instruction})
         
-        for msg in self.context:
+        ctx = context if context is not None else self.context
+        for msg in ctx:
+            role = msg['role']
+            if role == 'model':
+                role = 'assistant'
             content = {
-                'role': msg['role'],
+                'role': role,
                 'content': f"from {msg['name']}: {msg['content']}"
             }
             messages.append(content)
@@ -45,5 +47,4 @@ class OpenAILikeBackend(ChatBackend):
         )
         reply = resp.choices[0].message.content.strip()
 
-        self.add_context('assistant', reply, self.bot_name)
         return reply
