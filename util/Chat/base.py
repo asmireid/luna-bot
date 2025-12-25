@@ -60,7 +60,7 @@ class ChatBackend(ABC):
         reply = await self._generate_reply(**kwargs)
         # print(f"Chat: generated reply: {reply}")
 
-        await self.add_context('model', reply, self.bot_name, background=True)
+        await self.add_context('model', reply, self.bot_name)
         return reply
     
     async def summarize(self, context: Optional[List[Dict[str, str]]] = None, **kwargs) -> str:
@@ -79,7 +79,7 @@ class ChatBackend(ABC):
 
         return reply
 
-    async def add_context(self, role: str, content: str, name: str, background: bool = False):
+    async def add_context(self, role: str, content: str, name: str):
         # print(f"Chat: adding context ({role}, {name}): {content[:50]}...")
         self.context.append({'role': role, 'content': content, 'name': name})
         if len(self.context) > self.context_limit:
@@ -88,11 +88,8 @@ class ChatBackend(ABC):
             # Snapshot the context to summarize and clear the main context
             context_to_summarize = self.context[:]
             self.reset_context(self.context_keep)
-            
-            if background:
-                asyncio.create_task(self.summarize(context_to_summarize))
-            else:
-                await self.summarize(context_to_summarize)
+
+            asyncio.create_task(self.summarize(context_to_summarize))
     
     def pop_context(self, index: int = 0):
         self.context.pop(index)

@@ -2,13 +2,9 @@ import os
 import logging
 import asyncio
 from discord.ext import commands
-from config.config import Config
 
 from utilities import *
-from util.Chat.local import LocalBackend
-from util.Chat.gemini import GeminiBackend
-from util.Chat.openai_like import OpenAILikeBackend
-
+from util.Chat.backend_factory import create_backend
 
 class Chat(commands.Cog):
     def __init__(self, bot):
@@ -16,8 +12,9 @@ class Chat(commands.Cog):
         self.chat_queue = asyncio.Queue()
         self.processing_task = None
 
-        self.switch_backend(Config().chat_backend)
-        print(f"Chat initialized with {Config().chat_backend.capitalize()} Backend.")
+        configs = Config()
+        self.backend = create_backend(configs, configs.chat_backend, configs.model)
+        print(f"Chat initialized with {configs.chat_backend.capitalize()} Backend.")
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -66,62 +63,25 @@ class Chat(commands.Cog):
 
     @commands.command(help="displays the context")
     async def display_context(self, ctx):
-        # if not self.backend.context:
-        #     await try_reply(ctx, f"No context yet.")
-        #     return
+        if not self.backend.context and not self.backend.memory:
+            await try_reply(ctx, f"No context yet.")
+            return
 
         msg_embed = make_embed(ctx, title=f"{Config().bot_name}'s Chat", descr=f"Displaying stored context.")
+
+        if self.backend.memory:
+            msg_embed.add_field(name="Memory", value=trim_embed_value(self.backend.memory), inline=False)
+
         for m in self.backend.context:
             name = m.get("name") or m.get("role", "unknown")
             content = m.get("content", "")
-            # Discord embed field value length limit
-            if len(content) > 1024:
-                content = content[:1021] + "..."
-            msg_embed.add_field(name=name, value=content, inline=False)
-
-        msg_embed.add_field(name="Memory", value=self.backend.memory, inline=False)
+            msg_embed.add_field(name=name, value=trim_embed_value(content), inline=False)
 
         await try_reply(ctx, msg_embed)
 
-    @commands.command(name="switch_backend")
-    async def switch_backend(self, ctx, backend_name: str):
-        name = backend_name.lower()
-        self.switch_backend(name)
-        await try_reply(ctx, f"Switched to {backend_name.capitalize()} Backend.")
-    
-    def switch_backend(self, backend_name: str):
-        name = backend_name.lower()
-        if name == "gemini":
-            self.backend = GeminiBackend(
-                api_key=Config().gemini_api_key,
-                proxy_url=Config().gemini_proxy_url,
-                model=Config().model,
-                system_prompt=Config().system_prompt,
-                summarize_prompt= Config().summarize_prompt,
-                context_limit=Config().context_limit,
-                context_keep=Config().context_keep,
-                bot_name=Config().bot_name
-            )
-        elif name == "openai" or "openai-like" or "deepseek":
-            self.backend = OpenAILikeBackend(
-                api_key=Config().openai_like_api_key,
-                base_url=Config().openai_like_base_url,
-                model=Config().model,
-                system_prompt=Config().system_prompt,
-                summarize_prompt= Config().summarize_prompt,
-                context_limit=Config().context_limit,
-                context_keep=Config().context_keep,
-                bot_name=Config().bot_name
-            )
-        else:
-            self.backend = LocalBackend(
-                api_url=Config().local_api_url,
-                system_prompt=Config().system_prompt,
-                summarize_prompt= Config().summarize_prompt,
-                context_limit=Config().context_limit,
-                context_keep=Config().context_keep,
-                bot_name=Config().bot_name
-            )
+    def _switch_backend(self, backend_name: str, model: str = None):
+        self.backend = create_backend(Config(), backend_name, model)
+
 
 async def setup(bot):
     await bot.add_cog(Chat(bot))
