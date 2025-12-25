@@ -11,5 +11,7 @@ util/prompt_gen.py
 run.bat
 */system_prompt.txt
 system_prompt.txt
+*/summarize_prompt.txt
+summarize_prompt.txt
 */.DS_Store
 .DS_Store

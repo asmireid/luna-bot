@@ -5,11 +5,11 @@ from .base import ChatBackend
 class LocalBackend(ChatBackend):
     def __init__(self, api_url: str,
                 context_limit: int,
+                context_keep: int = 2,
                 system_prompt: str = None,
                 bot_name: str = "Luna"):
-        super().__init__(context_limit, system_prompt=system_prompt)
+        super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, bot_name=bot_name)
         self.api_url = api_url
-        self.bot_name = bot_name
 
     async def _generate_reply(self, context: Optional[List[Dict[str, str]]] = None, **kwargs) -> str:
         # author_name = kwargs.get('author_name', 'User')

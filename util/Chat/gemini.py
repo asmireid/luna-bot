@@ -12,11 +12,10 @@ class GeminiBackend(ChatBackend):
                 system_prompt: str = None,
                 summarize_prompt: str = None,
                 bot_name: str = "Luna"):
-        super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, summarize_prompt=summarize_prompt)
+        super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, summarize_prompt=summarize_prompt, bot_name=bot_name)
         http_options = {'base_url': proxy_url} if proxy_url else None
         self.client = genai.Client(api_key=api_key, http_options=http_options)
         self.model = model
-        self.bot_name = bot_name
 
     async def _generate_reply(self, context: Optional[List[Dict[str, str]]] = None, use_system_prompt:bool = True, **kwargs) -> str:
         # Construct prompt from context
