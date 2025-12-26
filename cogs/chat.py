@@ -47,12 +47,12 @@ class Chat(commands.Cog):
                         'data': await attachment.read(),
                         'mime_type': mime_type,
                     })
-
+        configs = Config()
         params = {
-            'temperature': Config().temperature, 
-            'top_p': Config().top_p, 
-            'top_k': Config().top_k,
-            'max_new_tokens': Config().max_new_tokens,
+            'temperature': configs.temperature, 
+            'top_p': configs.top_p, 
+            'top_k': configs.top_k,
+            'max_new_tokens': configs.max_new_tokens,
             'author_name': ctx.author.nick or ctx.author.name,
             'images': images
         }

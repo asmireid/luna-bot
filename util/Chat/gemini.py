@@ -54,7 +54,12 @@ class GeminiBackend(ChatBackend):
         
 
         loop = asyncio.get_running_loop()
-        config = genai.types.GenerateContentConfig(system_instruction=system_instruction) if use_system_prompt and system_instruction else None
+        config = genai.types.GenerateContentConfig(
+            top_k=kwargs.get("top_k"),
+            top_p=kwargs.get("top_p"),
+            temperature=kwargs.get("temperature"),
+            max_output_tokens=kwargs.get("max_new_tokens"),
+            system_instruction=system_instruction) if use_system_prompt and system_instruction else None
 
         # Run synchronous SDK call in executor
         response = await loop.run_in_executor(
