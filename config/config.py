@@ -47,12 +47,7 @@ class Config:
                 )
 
     def is_sensitive(self, option):
-        return option in self.config.get('credentials', {})
-
-    def is_sensitive(self, option):
-        if option in self.config['credentials']:
-            return True
-        return False
+        return option in self.config['credentials']
 
     # @property
     # def bot_token(self):
