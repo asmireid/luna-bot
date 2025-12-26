@@ -1,4 +1,5 @@
 import asyncio
+import base64
 from typing import List, Dict, Optional
 from openai import OpenAI
 from .base import ChatBackend
@@ -27,10 +28,22 @@ class OpenAILikeBackend(ChatBackend):
             role = msg['role']
             if role == 'model':
                 role = 'assistant'
-            content = {
-                'role': role,
-                'content': f"from {msg['name']}: {msg['content']}"
-            }
+            
+            text_content = f"from {msg['name']}: {msg['content']}"
+            images = msg.get('images', [])
+
+            if images:
+                content_parts = [{"type": "text", "text": text_content}]
+                for img in images:
+                    b64_data = base64.b64encode(img['data']).decode('utf-8')
+                    mime_type = img['mime_type']
+                    content_parts.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime_type};base64,{b64_data}"}
+                    })
+                content = {'role': role, 'content': content_parts}
+            else:
+                content = {'role': role, 'content': text_content}
             messages.append(content)
         # print(messages)
 

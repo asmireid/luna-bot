@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+import mimetypes
 from discord.ext import commands
 
 from utilities import *
@@ -31,13 +32,29 @@ class Chat(commands.Cog):
             await self.chat(ctx, message=cleaned)
 
     @commands.command(aliases=['说话'], help="chats with user")
-    async def chat(self, ctx, *, message):
+    async def chat(self, ctx, *, message=None):
+        if message is None:
+            message = ""
+
+        images = []
+        if ctx.message.attachments:
+            for attachment in ctx.message.attachments:
+                mime_type = attachment.content_type or mimetypes.guess_type(attachment.filename)[0]
+
+                if mime_type and mime_type.startswith('image/'):
+                    images.append({
+                        'name': attachment.filename,
+                        'data': await attachment.read(),
+                        'mime_type': mime_type,
+                    })
+
         params = {
             'temperature': Config().temperature, 
             'top_p': Config().top_p, 
             'top_k': Config().top_k,
             'max_new_tokens': Config().max_new_tokens,
-            'author_name': ctx.author.nick or ctx.author.name
+            'author_name': ctx.author.nick or ctx.author.name,
+            'images': images
         }
         # print(params)
         await self.chat_queue.put((message, params, ctx))

@@ -55,10 +55,10 @@ class ChatBackend(ABC):
     async def chat(self, message: str, **kwargs) -> str:
         # print(f"Chat: received message: {message}")
         author_name = kwargs.get('author_name', 'User')
-        await self.add_context('user', message, author_name)
+        images = kwargs.get('images', [])
+        await self.add_context('user', message, author_name,images=images)
         
         reply = await self._generate_reply(**kwargs)
-        # print(f"Chat: generated reply: {reply}")
 
         await self.add_context('model', reply, self.bot_name)
         return reply
@@ -79,9 +79,9 @@ class ChatBackend(ABC):
 
         return reply
 
-    async def add_context(self, role: str, content: str, name: str):
+    async def add_context(self, role: str, content: str, name: str, images:list = []):
         # print(f"Chat: adding context ({role}, {name}): {content[:50]}...")
-        self.context.append({'role': role, 'content': content, 'name': name})
+        self.context.append({'role': role, 'content': content, 'name': name, 'images': images})
         if len(self.context) > self.context_limit:
             print("Chat: context limit reached.")
             

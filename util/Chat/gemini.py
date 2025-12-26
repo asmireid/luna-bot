@@ -1,6 +1,9 @@
 import asyncio
+import requests
+
 from typing import List, Dict, Optional
 from google import genai
+from google.genai import types
 from .base import ChatBackend
 
 class GeminiBackend(ChatBackend):
@@ -26,9 +29,20 @@ class GeminiBackend(ChatBackend):
         for msg in ctx:
             content = {
                 'role': msg['role'],
-                'parts': [{"text": f"from {msg['name']}: {msg['content']}"}]
+                'parts': [types.Part(text=f"from {msg['name']}: {msg['content']}")]
             }
+
+            images = msg.get('images', [])
+            for image in images:
+                content['parts'].append(
+                    types.Part.from_bytes(
+                            data=image['data'],
+                            mime_type=image['mime_type'],
+                        ),
+                )
             full_prompt.append(content)
+
+            print(content)
         
         # Add memory
         if self.memory:
