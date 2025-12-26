@@ -94,5 +94,11 @@ class ChatBackend(ABC):
     def pop_context(self, index: int = 0):
         self.context.pop(index)
 
-    def reset_context(self, keep=0):
-        self.context = self.context[-keep:]
+    def reset_context(self, keep=None):
+        if not keep:
+            self.context = []
+        else:
+            self.context = self.context[-keep:]
+    
+    def reset_memory(self):
+        self.memory = ''

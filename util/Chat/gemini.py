@@ -42,7 +42,7 @@ class GeminiBackend(ChatBackend):
                 )
             full_prompt.append(content)
 
-            print(content)
+            # print(content)
         
         # Add memory
         if self.memory:

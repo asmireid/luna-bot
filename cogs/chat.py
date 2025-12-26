@@ -65,10 +65,29 @@ class Chat(commands.Cog):
     async def process_chat_queue(self):
         while not self.chat_queue.empty():
             message, params, ctx = await self.chat_queue.get()
+
+            timeout_s = Config().timeout
+
             try:
                 async with ctx.typing():
-                    response = await self.backend.chat(message, **params)
+                    try:
+                        # first try
+                        response = await asyncio.wait_for(
+                            self.backend.chat(message, **params),
+                            timeout=timeout_s
+                        )
+                    except asyncio.TimeoutError:
+                        logging.warning(f"Backend timeout after {timeout_s}s; retrying once...")
+                        # second try
+                        response = await asyncio.wait_for(
+                            self.backend.chat(message, **params),
+                            timeout=timeout_s
+                        )
+
                     await try_reply(ctx, response)
+
+            except asyncio.TimeoutError:
+                await try_reply(ctx, f"Error: timed out after {timeout_s}s (retried once).")
             except Exception as e:
                 logging.error(f"Chat Error: {repr(e)}", exc_info=True)
                 await try_reply(ctx, f"Error: {str(e)}")
@@ -76,7 +95,8 @@ class Chat(commands.Cog):
     @commands.command(aliases=['清空', "忘记一切"], help="clears chat history")
     async def reset_chat(self, ctx):
         self.backend.reset_context()
-        await try_reply(ctx, "阿巴阿巴! 我忘记了一切!")
+        self.backend.reset_memory()
+        await try_reply(ctx, "阿巴阿巴！我忘记了一切！")
 
     @commands.command(help="displays the context")
     async def display_context(self, ctx):

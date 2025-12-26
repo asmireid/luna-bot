@@ -13,6 +13,8 @@ CHAT_RELOAD_KEYS = {
     "gemini_proxy_url",
     "system_prompt",
     "summarize_prompt",
+    "context_limit",
+    "context_keep"
 }
 
 
