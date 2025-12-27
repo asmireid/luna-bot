@@ -10,16 +10,17 @@ class ChatBackend(ABC):
                 context_keep: int = 2,
                 system_prompt: str = None,
                 summarize_prompt: str = None,
+                jailbreak_prompt: str = None,
                 bot_name: str = "Luna"):
         self.context_limit = context_limit
         self.context_keep = context_keep
-        self.system_prompt, self.summarize_prompt = self._load_prompts(system_prompt, summarize_prompt)
+        self.system_prompt, self.summarize_prompt, self.jailbreak_prompt = self._load_prompts(system_prompt, summarize_prompt, jailbreak_prompt)
         self.memory = ""
         self.context: List[Dict[str, str]] = []
         self.bot_name = bot_name
 
     def _load_prompt(self, prompt: str, kind: str) -> str:
-        if os.path.isfile(prompt):
+        if prompt and os.path.isfile(prompt):
             try:
                 with open(prompt, "r", encoding="utf-8") as f:
                     return f.read()
@@ -34,18 +35,20 @@ class ChatBackend(ABC):
     def _load_prompts(
         self,
         system_prompt: Optional[str] = None,
-        summarize_prompt: Optional[str] = None
-    ) -> Tuple[str, str]:
+        summarize_prompt: Optional[str] = None,
+        jailbreak_prompt: Optional[str] = None
+    ) -> Tuple[str, str, str]:
         raw = {
             "system": system_prompt,
             "summarize": summarize_prompt,
+            "jailbreak": jailbreak_prompt,
         }
 
         loaded = {}
         for kind, value in raw.items():
             loaded[kind] = self._load_prompt(value, kind)
 
-        return loaded["system"], loaded["summarize"]
+        return loaded["system"], loaded["summarize"], loaded["jailbreak"]
 
     @abstractmethod
     async def _generate_reply(self, context: Optional[List[Dict[str, str]]] = None, use_system_prompt: bool = True, **kwargs) -> str:
@@ -53,12 +56,20 @@ class ChatBackend(ABC):
         pass
     
     async def chat(self, message: str, **kwargs) -> str:
-        # print(f"Chat: received message: {message}")
+        print(f"Chat: received message: {message}")
         author_name = kwargs.get('author_name', 'User')
         images = kwargs.get('images', [])
         await self.add_context('user', message, author_name,images=images)
         
-        reply = await self._generate_reply(**kwargs)
+        timeout = kwargs.get('timeout')
+        if timeout:
+            try:
+                reply = await asyncio.wait_for(self._generate_reply(**kwargs), timeout=timeout)
+            except asyncio.TimeoutError:
+                print(f"Chat: Backend timeout after {timeout}s; retrying once...")
+                reply = await asyncio.wait_for(self._generate_reply(**kwargs), timeout=timeout)
+        else:
+            reply = await self._generate_reply(**kwargs)
 
         await self.add_context('model', reply, self.bot_name)
         return reply
@@ -80,7 +91,7 @@ class ChatBackend(ABC):
         return reply
 
     async def add_context(self, role: str, content: str, name: str, images:list = []):
-        # print(f"Chat: adding context ({role}, {name}): {content[:50]}...")
+        print(f"Chat: adding context ({role}, {name}): {content[:50]}...")
         self.context.append({'role': role, 'content': content, 'name': name, 'images': images})
         if len(self.context) > self.context_limit:
             print("Chat: context limit reached.")

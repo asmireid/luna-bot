@@ -14,8 +14,9 @@ class GeminiBackend(ChatBackend):
                 model: str = "gemini-3-flash-preview",
                 system_prompt: str = None,
                 summarize_prompt: str = None,
+                jailbreak_prompt: str = None,
                 bot_name: str = "Luna"):
-        super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, summarize_prompt=summarize_prompt, bot_name=bot_name)
+        super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, summarize_prompt=summarize_prompt, jailbreak_prompt=jailbreak_prompt, bot_name=bot_name)
         http_options = {'base_url': proxy_url} if proxy_url else None
         self.client = genai.Client(api_key=api_key, http_options=http_options)
         self.model = model
@@ -24,7 +25,15 @@ class GeminiBackend(ChatBackend):
         # Construct prompt from context
         full_prompt = []
         system_instruction = self.system_prompt
-        
+                
+        # Add memory
+        if self.memory:
+            memory = {
+                'role': 'model',
+                'parts': [{"text":f"Memory: {self.memory}"}]
+            }
+            full_prompt.append(memory)
+
         ctx = context if context is not None else self.context
         for msg in ctx:
             content = {
@@ -42,16 +51,14 @@ class GeminiBackend(ChatBackend):
                 )
             full_prompt.append(content)
 
-            # print(content)
-        
-        # Add memory
-        if self.memory:
-            memory = {
-                'role': 'model',
-                'parts': [{"text":f"Memory: {self.memory}"}]
+        # Add jailbreak prompt
+        if self.jailbreak_prompt:
+            jb = {
+                'role': "model",
+                'parts': [types.Part(text=self.jailbreak_prompt)]
             }
-            full_prompt.append(memory)
-        
+
+            full_prompt.append(jb)
 
         loop = asyncio.get_running_loop()
         config = genai.types.GenerateContentConfig(

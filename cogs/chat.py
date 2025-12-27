@@ -54,7 +54,8 @@ class Chat(commands.Cog):
             'top_k': configs.top_k,
             'max_new_tokens': configs.max_new_tokens,
             'author_name': ctx.author.nick or ctx.author.name,
-            'images': images
+            'images': images,
+            'timeout': configs.timeout
         }
         # print(params)
         await self.chat_queue.put((message, params, ctx))
@@ -66,27 +67,13 @@ class Chat(commands.Cog):
         while not self.chat_queue.empty():
             message, params, ctx = await self.chat_queue.get()
 
-            timeout_s = Config().timeout
-
             try:
                 async with ctx.typing():
-                    try:
-                        # first try
-                        response = await asyncio.wait_for(
-                            self.backend.chat(message, **params),
-                            timeout=timeout_s
-                        )
-                    except asyncio.TimeoutError:
-                        logging.warning(f"Backend timeout after {timeout_s}s; retrying once...")
-                        # second try
-                        response = await asyncio.wait_for(
-                            self.backend.chat(message, **params),
-                            timeout=timeout_s
-                        )
-
+                    response = await self.backend.chat(message, **params)
                     await try_reply(ctx, response)
 
             except asyncio.TimeoutError:
+                timeout_s = params.get('timeout')
                 await try_reply(ctx, f"Error: timed out after {timeout_s}s (retried once).")
             except Exception as e:
                 logging.error(f"Chat Error: {repr(e)}", exc_info=True)

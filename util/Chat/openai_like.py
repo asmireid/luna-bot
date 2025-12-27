@@ -12,8 +12,9 @@ class OpenAILikeBackend(ChatBackend):
                 context_keep: int = 2,
                 system_prompt: str = None,
                 summarize_prompt: str = None,
+                jailbreak_prompt: str = None,
                 bot_name: str = "Luna"):
-        super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, summarize_prompt=summarize_prompt, bot_name=bot_name)
+        super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, summarize_prompt=summarize_prompt, jailbreak_prompt=jailbreak_prompt, bot_name=bot_name)
         self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.model = model
 
