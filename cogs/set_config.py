@@ -1,8 +1,22 @@
 import os
-
+import logging
 from discord.ext import commands
-
 from utilities import *
+from util.Chat.backend_factory import create_backend
+
+
+CHAT_RELOAD_KEYS = {
+    "chat_backend",
+    "model",
+    "openai_like_base_url",
+    "local_api_url",
+    "gemini_proxy_url",
+    "system_prompt",
+    "summarize_prompt",
+    "jailbreak_prompt",
+    "context_limit",
+    "context_keep"
+}
 
 
 async def set_helper(ctx, option, value: str):
@@ -10,7 +24,6 @@ async def set_helper(ctx, option, value: str):
 
     # Check if the specified option exists as an attribute of the Config instance
     if hasattr(configs, option):
-
         # makes sure user cannot alter credentials in Discord
         if configs.is_sensitive(option):
             await try_reply(ctx, f"{option} is sensitive information. Please set it in the config.ini file.")
@@ -27,8 +40,41 @@ async def set_helper(ctx, option, value: str):
         conf_embed.add_field(name="Old -> New", value=f"{old_value} -> {value}")
         await try_display_confirmation(ctx, conf_embed)
 
+        await _reload_chat_backend_if_needed(ctx, option)
     else:
         await try_reply(ctx, f"{option} is not a valid option...")
+
+
+async def _reload_chat_backend_if_needed(ctx, changed_option):
+    configs = Config()
+    if changed_option not in CHAT_RELOAD_KEYS:
+        return
+
+    chat_cog = ctx.bot.get_cog("Chat")
+    if chat_cog is None:
+        await try_reply(ctx, "Config saved, but Chat cog is not loaded.")
+        return
+
+    old_backend = getattr(chat_cog, "backend", None)
+
+    new_backend = create_backend(
+        configs,
+        configs.chat_backend,
+        configs.model
+    )
+
+    if old_backend is not None:
+        try:
+            new_backend.context = list(getattr(old_backend, "context", []) or [])
+            new_backend.memory = getattr(old_backend, "memory", "") or ""
+        except Exception as e:
+            logging.error(
+                f"Failed to migrate backend state: {repr(e)}",
+                exc_info=True
+            )
+
+    chat_cog.backend = new_backend
+    print(f"Chat backend reloaded due to `{changed_option}` update.")
 
 
 async def command_prefix(ctx, value):

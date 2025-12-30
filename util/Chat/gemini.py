@@ -1,6 +1,9 @@
 import asyncio
+import requests
+
 from typing import List, Dict, Optional
 from google import genai
+from google.genai import types
 from .base import ChatBackend
 
 class GeminiBackend(ChatBackend):
@@ -11,8 +14,9 @@ class GeminiBackend(ChatBackend):
                 model: str = "gemini-3-flash-preview",
                 system_prompt: str = None,
                 summarize_prompt: str = None,
+                jailbreak_prompt: str = None,
                 bot_name: str = "Luna"):
-        super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, summarize_prompt=summarize_prompt, bot_name=bot_name)
+        super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, summarize_prompt=summarize_prompt, jailbreak_prompt=jailbreak_prompt, bot_name=bot_name)
         http_options = {'base_url': proxy_url} if proxy_url else None
         self.client = genai.Client(api_key=api_key, http_options=http_options)
         self.model = model
@@ -21,15 +25,7 @@ class GeminiBackend(ChatBackend):
         # Construct prompt from context
         full_prompt = []
         system_instruction = self.system_prompt
-        
-        ctx = context if context is not None else self.context
-        for msg in ctx:
-            content = {
-                'role': msg['role'],
-                'parts': [{"text": f"from {msg['name']}: {msg['content']}"}]
-            }
-            full_prompt.append(content)
-        
+                
         # Add memory
         if self.memory:
             memory = {
@@ -37,10 +33,40 @@ class GeminiBackend(ChatBackend):
                 'parts': [{"text":f"Memory: {self.memory}"}]
             }
             full_prompt.append(memory)
-        
+
+        ctx = context if context is not None else self.context
+        for msg in ctx:
+            content = {
+                'role': msg['role'],
+                'parts': [types.Part(text=f"from {msg['name']}: {msg['content']}")]
+            }
+
+            images = msg.get('images', [])
+            for image in images:
+                content['parts'].append(
+                    types.Part.from_bytes(
+                            data=image['data'],
+                            mime_type=image['mime_type'],
+                        ),
+                )
+            full_prompt.append(content)
+
+        # Add jailbreak prompt
+        if self.jailbreak_prompt:
+            jb = {
+                'role': "model",
+                'parts': [types.Part(text=self.jailbreak_prompt)]
+            }
+
+            full_prompt.append(jb)
 
         loop = asyncio.get_running_loop()
-        config = genai.types.GenerateContentConfig(system_instruction=system_instruction) if use_system_prompt and system_instruction else None
+        config = genai.types.GenerateContentConfig(
+            top_k=kwargs.get("top_k"),
+            top_p=kwargs.get("top_p"),
+            temperature=kwargs.get("temperature"),
+            max_output_tokens=kwargs.get("max_new_tokens"),
+            system_instruction=system_instruction) if use_system_prompt and system_instruction else None
 
         # Run synchronous SDK call in executor
         response = await loop.run_in_executor(

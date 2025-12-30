@@ -1,7 +1,5 @@
 import asyncio
-
 import discord
-
 from config.config import Config
 
 
@@ -41,3 +39,7 @@ def make_embed(ctx, title, descr=None, color=discord.Color.dark_embed()) -> disc
     msg_embed.set_footer(text=Config().embed_footer)
 
     return msg_embed
+
+def trim_embed_value(text):
+    # Discord embed field value length limit
+    return text[:1021] + "..." if len(text) > 1024 else text

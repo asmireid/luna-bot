@@ -1,14 +1,11 @@
 import os
 import logging
 import asyncio
+import mimetypes
 from discord.ext import commands
-from config.config import Config
 
 from utilities import *
-from util.Chat.local import LocalBackend
-from util.Chat.gemini import GeminiBackend
-from util.Chat.openai_like import OpenAILikeBackend
-
+from util.Chat.backend_factory import create_backend
 
 class Chat(commands.Cog):
     def __init__(self, bot):
@@ -16,8 +13,9 @@ class Chat(commands.Cog):
         self.chat_queue = asyncio.Queue()
         self.processing_task = None
 
-        self.switch_backend(Config().chat_backend)
-        print(f"Chat initialized with {Config().chat_backend.capitalize()} Backend.")
+        configs = Config()
+        self.backend = create_backend(configs, configs.chat_backend, configs.model)
+        print(f"Chat initialized with {configs.chat_backend.capitalize()} Backend.")
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -34,13 +32,30 @@ class Chat(commands.Cog):
             await self.chat(ctx, message=cleaned)
 
     @commands.command(aliases=['说话'], help="chats with user")
-    async def chat(self, ctx, *, message):
+    async def chat(self, ctx, *, message=None):
+        if message is None:
+            message = ""
+
+        images = []
+        if ctx.message.attachments:
+            for attachment in ctx.message.attachments:
+                mime_type = attachment.content_type or mimetypes.guess_type(attachment.filename)[0]
+
+                if mime_type and mime_type.startswith('image/'):
+                    images.append({
+                        'name': attachment.filename,
+                        'data': await attachment.read(),
+                        'mime_type': mime_type,
+                    })
+        configs = Config()
         params = {
-            'temperature': Config().temperature, 
-            'top_p': Config().top_p, 
-            'top_k': Config().top_k,
-            'max_new_tokens': Config().max_new_tokens,
-            'author_name': ctx.author.nick or ctx.author.name
+            'temperature': configs.temperature, 
+            'top_p': configs.top_p, 
+            'top_k': configs.top_k,
+            'max_new_tokens': configs.max_new_tokens,
+            'author_name': ctx.author.nick or ctx.author.name,
+            'images': images,
+            'timeout': configs.timeout
         }
         # print(params)
         await self.chat_queue.put((message, params, ctx))
@@ -51,10 +66,15 @@ class Chat(commands.Cog):
     async def process_chat_queue(self):
         while not self.chat_queue.empty():
             message, params, ctx = await self.chat_queue.get()
+
             try:
                 async with ctx.typing():
                     response = await self.backend.chat(message, **params)
                     await try_reply(ctx, response)
+
+            except asyncio.TimeoutError:
+                timeout_s = params.get('timeout')
+                await try_reply(ctx, f"Error: timed out after {timeout_s}s (retried once).")
             except Exception as e:
                 logging.error(f"Chat Error: {repr(e)}", exc_info=True)
                 await try_reply(ctx, f"Error: {str(e)}")
@@ -62,66 +82,30 @@ class Chat(commands.Cog):
     @commands.command(aliases=['清空', "忘记一切"], help="clears chat history")
     async def reset_chat(self, ctx):
         self.backend.reset_context()
-        await try_reply(ctx, "阿巴阿巴! 我忘记了一切!")
+        self.backend.reset_memory()
+        await try_reply(ctx, "阿巴阿巴！我忘记了一切！")
 
     @commands.command(help="displays the context")
     async def display_context(self, ctx):
-        # if not self.backend.context:
-        #     await try_reply(ctx, f"No context yet.")
-        #     return
+        if not self.backend.context and not self.backend.memory:
+            await try_reply(ctx, f"No context yet.")
+            return
 
         msg_embed = make_embed(ctx, title=f"{Config().bot_name}'s Chat", descr=f"Displaying stored context.")
+
+        if self.backend.memory:
+            msg_embed.add_field(name="Memory", value=trim_embed_value(self.backend.memory), inline=False)
+
         for m in self.backend.context:
             name = m.get("name") or m.get("role", "unknown")
             content = m.get("content", "")
-            # Discord embed field value length limit
-            if len(content) > 1024:
-                content = content[:1021] + "..."
-            msg_embed.add_field(name=name, value=content, inline=False)
-
-        msg_embed.add_field(name="Memory", value=self.backend.memory, inline=False)
+            msg_embed.add_field(name=name, value=trim_embed_value(content), inline=False)
 
         await try_reply(ctx, msg_embed)
 
-    @commands.command(name="switch_backend")
-    async def switch_backend(self, ctx, backend_name: str):
-        name = backend_name.lower()
-        self.switch_backend(name)
-        await try_reply(ctx, f"Switched to {backend_name.capitalize()} Backend.")
-    
-    def switch_backend(self, backend_name: str):
-        name = backend_name.lower()
-        if name == "gemini":
-            self.backend = GeminiBackend(
-                api_key=Config().gemini_api_key,
-                proxy_url=Config().gemini_proxy_url,
-                model=Config().model,
-                system_prompt=Config().system_prompt,
-                summarize_prompt= Config().summarize_prompt,
-                context_limit=Config().context_limit,
-                context_keep=Config().context_keep,
-                bot_name=Config().bot_name
-            )
-        elif name == "openai" or "openai-like" or "deepseek":
-            self.backend = OpenAILikeBackend(
-                api_key=Config().openai_like_api_key,
-                base_url=Config().openai_like_base_url,
-                model=Config().model,
-                system_prompt=Config().system_prompt,
-                summarize_prompt= Config().summarize_prompt,
-                context_limit=Config().context_limit,
-                context_keep=Config().context_keep,
-                bot_name=Config().bot_name
-            )
-        else:
-            self.backend = LocalBackend(
-                api_url=Config().local_api_url,
-                system_prompt=Config().system_prompt,
-                summarize_prompt= Config().summarize_prompt,
-                context_limit=Config().context_limit,
-                context_keep=Config().context_keep,
-                bot_name=Config().bot_name
-            )
+    def _switch_backend(self, backend_name: str, model: str = None):
+        self.backend = create_backend(Config(), backend_name, model)
+
 
 async def setup(bot):
     await bot.add_cog(Chat(bot))
