@@ -1,0 +1,202 @@
+{
+  "4": {
+    "inputs": {
+      "ckpt_name": "ChenkinNoobV2.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint - BASE"
+    }
+  },
+  "5": {
+    "inputs": {
+      "width": [
+        "57",
+        0
+      ],
+      "height": [
+        "59",
+        0
+      ],
+      "batch_size": [
+        "61",
+        0
+      ]
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "6": {
+    "inputs": {
+      "text": [
+        "79",
+        0
+      ],
+      "clip": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Positive Prompt Clip"
+    }
+  },
+  "7": {
+    "inputs": {
+      "text": [
+        "80",
+        0
+      ],
+      "clip": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Negative Prompt Clip"
+    }
+  },
+  "17": {
+    "inputs": {
+      "samples": [
+        "54",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "54": {
+    "inputs": {
+      "seed": [
+        "65",
+        0
+      ],
+      "steps": [
+        "63",
+        0
+      ],
+      "cfg": [
+        "81",
+        0
+      ],
+      "sampler_name": "euler_ancestral",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "4",
+        0
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "latent_image": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "57": {
+    "inputs": {
+      "value": 832
+    },
+    "class_type": "easy int",
+    "_meta": {
+      "title": "[VAR]Width"
+    }
+  },
+  "59": {
+    "inputs": {
+      "value": 1216
+    },
+    "class_type": "easy int",
+    "_meta": {
+      "title": "[VAR]Height"
+    }
+  },
+  "61": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "easy int",
+    "_meta": {
+      "title": "[VAR]BatchSize"
+    }
+  },
+  "63": {
+    "inputs": {
+      "value": 25
+    },
+    "class_type": "easy int",
+    "_meta": {
+      "title": "[VAR]Steps"
+    }
+  },
+  "65": {
+    "inputs": {
+      "seed": -1
+    },
+    "class_type": "Seed (rgthree)",
+    "_meta": {
+      "title": "[VAR]Seed"
+    }
+  },
+  "save_image_websocket_node": {
+    "inputs": {
+      "images": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "SaveImageWebsocket",
+    "_meta": {
+      "title": "SaveImageWebsocket"
+    }
+  },
+  "79": {
+    "inputs": {
+      "value": "(azz0422:0.8), (ask \\(askzy\\):0.7), (ratatatat74:0.6),(tianliang duohe fangdongye:0.4), 1girl, solo, shu \\(arknights\\), flat color, shiny skin, very awa, masterpiece, best quality, newest, absurdres, year 2025,"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "[VAR]PositivePrompt"
+    }
+  },
+  "80": {
+    "inputs": {
+      "value": "low resolution, e621, Furry, old, bad quality,worst quality,worst detail,censor, messy hair,sketch, multiple views,"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "[VAR]NegativePrompt"
+    }
+  },
+  "81": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "[VAR]CFG"
+    }
+  }
+}
