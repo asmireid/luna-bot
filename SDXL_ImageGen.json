@@ -160,18 +160,6 @@
       "title": "[VAR]Seed"
     }
   },
-  "save_image_websocket_node": {
-    "inputs": {
-      "images": [
-        "17",
-        0
-      ]
-    },
-    "class_type": "SaveImageWebsocket",
-    "_meta": {
-      "title": "SaveImageWebsocket"
-    }
-  },
   "79": {
     "inputs": {
       "value": "(azz0422:0.8), (ask \\(askzy\\):0.7), (ratatatat74:0.6),(tianliang duohe fangdongye:0.4), 1girl, solo, shu \\(arknights\\), flat color, shiny skin, very awa, masterpiece, best quality, newest, absurdres, year 2025,"
@@ -197,6 +185,19 @@
     "class_type": "PrimitiveFloat",
     "_meta": {
       "title": "[VAR]CFG"
+    }
+  },
+  "85": {
+    "inputs": {
+      "filename_prefix": "TEMP-SDXL-",
+      "images": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
     }
   }
 }
