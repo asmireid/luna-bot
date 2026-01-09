@@ -18,6 +18,13 @@ CHAT_RELOAD_KEYS = {
     "context_keep"
 }
 
+PAINT_RELOAD_KEYS = {
+    "paint_backend",
+    "comfyui_url",
+    "comfyui_workflow_folder",
+    "workflow"
+}
+
 
 async def set_helper(ctx, option, value: str):
     configs = Config()
@@ -41,6 +48,7 @@ async def set_helper(ctx, option, value: str):
         await try_display_confirmation(ctx, conf_embed)
 
         await _reload_chat_backend_if_needed(ctx, option)
+        await _reload_paint_backend_if_needed(ctx, option)
     else:
         await try_reply(ctx, f"{option} is not a valid option...")
 
@@ -75,6 +83,19 @@ async def _reload_chat_backend_if_needed(ctx, changed_option):
 
     chat_cog.backend = new_backend
     print(f"Chat backend reloaded due to `{changed_option}` update.")
+
+
+async def _reload_paint_backend_if_needed(ctx, changed_option):
+    if changed_option not in PAINT_RELOAD_KEYS:
+        return
+
+    paint_cog = ctx.bot.get_cog("Paint")
+    if paint_cog is None:
+        await try_reply(ctx, "Config saved, but Paint cog is not loaded.")
+        return
+
+    paint_cog._load_backend()
+    print(f"Paint backend reloaded due to `{changed_option}` update.")
 
 
 async def command_prefix(ctx, value):

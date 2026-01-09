@@ -11,11 +11,11 @@
   "5": {
     "inputs": {
       "width": [
-        "57",
+        "106",
         0
       ],
       "height": [
-        "59",
+        "107",
         0
       ],
       "batch_size": [
@@ -121,7 +121,7 @@
     },
     "class_type": "easy int",
     "_meta": {
-      "title": "[VAR]Width"
+      "title": "[VAR]ShortEdge"
     }
   },
   "59": {
@@ -130,7 +130,7 @@
     },
     "class_type": "easy int",
     "_meta": {
-      "title": "[VAR]Height"
+      "title": "[VAR]LongEdge"
     }
   },
   "61": {
@@ -162,7 +162,7 @@
   },
   "79": {
     "inputs": {
-      "value": "(azz0422:0.8), (ask \\(askzy\\):0.7), (ratatatat74:0.6),(tianliang duohe fangdongye:0.4), 1girl, solo, shu \\(arknights\\), flat color, shiny skin, very awa, masterpiece, best quality, newest, absurdres, year 2025,"
+      "value": "(azz0422:0.4), (ask \\(askzy\\):0.7), (ratatatat74:0.4),(tianliang duohe fangdongye:0.4), 1girl, solo, shu \\(arknights\\), flat color, shiny skin, very awa, masterpiece, best quality, newest, absurdres, year 2025,"
     },
     "class_type": "PrimitiveString",
     "_meta": {
@@ -180,24 +180,97 @@
   },
   "81": {
     "inputs": {
-      "value": 5
+      "value": 4
     },
     "class_type": "PrimitiveFloat",
     "_meta": {
       "title": "[VAR]CFG"
     }
   },
-  "85": {
+  "100": {
     "inputs": {
-      "filename_prefix": "TEMP-SDXL-",
-      "images": [
+      "model_name": "2x-AnimeSharpV4_Fast_RCAN_PU.safetensors"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": {
+      "title": "Load Upscale Model"
+    }
+  },
+  "103": {
+    "inputs": {
+      "upscale_model": [
+        "100",
+        0
+      ],
+      "image": [
         "17",
         0
       ]
     },
-    "class_type": "SaveImage",
+    "class_type": "ImageUpscaleWithModel",
     "_meta": {
-      "title": "Save Image"
+      "title": "Upscale Image (using Model)"
+    }
+  },
+  "104": {
+    "inputs": {
+      "value": true
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "[VAR]Portrait"
+    }
+  },
+  "106": {
+    "inputs": {
+      "switch": [
+        "104",
+        0
+      ],
+      "on_false": [
+        "59",
+        0
+      ],
+      "on_true": [
+        "57",
+        0
+      ]
+    },
+    "class_type": "LazySwitchKJ",
+    "_meta": {
+      "title": "Width"
+    }
+  },
+  "107": {
+    "inputs": {
+      "switch": [
+        "104",
+        0
+      ],
+      "on_false": [
+        "57",
+        0
+      ],
+      "on_true": [
+        "59",
+        0
+      ]
+    },
+    "class_type": "LazySwitchKJ",
+    "_meta": {
+      "title": "Height"
+    }
+  },
+  "108": {
+    "inputs": {
+      "images": [
+        "103",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
     }
   }
 }

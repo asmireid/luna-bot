@@ -28,6 +28,20 @@ class PaintBackend(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_variables(self) -> Dict[str, Any]:
+        """
+        Returns a dictionary of available variables and their default values.
+        """
+        pass
+
+    @abstractmethod
+    def list_workflows(self) -> List[str]:
+        """
+        Returns a list of available workflow files.
+        """
+        pass
+
     async def paint(self, prompt: str, negative_prompt: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
         """
         Generates media (images or videos) based on the provided prompts.

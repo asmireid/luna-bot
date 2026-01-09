@@ -11,17 +11,19 @@ from typing import List, Dict, Any, Optional
 from .base import PaintBackend
 
 class ComfyUIBackend(PaintBackend):
-    def __init__(self, server_address="127.0.0.1:8188", workflow_file="SDXL_ImageGen.json", **kwargs):
+    def __init__(self, server_address="127.0.0.1:8188", 
+                 comfyui_workflow_folder="comfyui_workflows", 
+                 workflow_file="SDXL_ImageGen.json", 
+                 **kwargs):
         super().__init__(**kwargs)
         self.server_address = server_address
         self.client_id = str(uuid.uuid4())
         
         # Resolve workflow file path
-        if not os.path.isabs(workflow_file) and not os.path.exists(workflow_file):
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            potential_path = os.path.join(current_dir, workflow_file)
-            if os.path.exists(potential_path):
-                workflow_file = potential_path
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        potential_path = os.path.join(current_dir, comfyui_workflow_folder, workflow_file)
+        if os.path.exists(potential_path):
+            workflow_file = potential_path
         
         self.workflow_file = workflow_file
         self.workflow_vars = self._get_workflow_variables(self.workflow_file)
@@ -91,6 +93,21 @@ class ComfyUIBackend(PaintBackend):
                 val = (id, keys, vals)
                 variables[var_name] = val
         return variables
+
+    def get_variables(self) -> Dict[str, Any]:
+        variables = {}
+        for name, (_, _, vals) in self.workflow_vars.items():
+            variables[name] = vals[0] if len(vals) == 1 else vals
+        return variables
+
+    def list_workflows(self) -> List[str]:
+        directory = os.path.dirname(self.workflow_file)
+        if not directory or not os.path.exists(directory):
+            directory = os.path.dirname(os.path.abspath(__file__))
+
+        if os.path.exists(directory):
+            return sorted([f for f in os.listdir(directory) if f.endswith('.json')])
+        return []
 
     def _generate_workflow_payload(self, workflow_path, **kwargs):
         with open(workflow_path, "r", encoding="utf-8") as f:
