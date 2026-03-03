@@ -13,10 +13,10 @@ class Paint(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.paint_queue = asyncio.Queue()
-        self.processing_task = None
 
         self.configs = Config()
         self._load_backend()
+        self.worker_task = asyncio.create_task(self._paint_worker())
 
     def _load_backend(self):
         self.configs = Config()
@@ -28,15 +28,19 @@ class Paint(commands.Cog):
             self.backend = ComfyUIBackend(
                 server_address=getattr(self.configs, 'comfyui_url', "127.0.0.1:8188"),
                 comfyui_workflow_folder=getattr(self.configs, 'comfyui_workflow_folder', "comfyui_workflows"),
-                workflow_file=getattr(self.configs, 'workflow', "SDXL_ImageGen.json")
+                workflow_file=getattr(self.configs, 'workflow', "Image_Anime_ChenkinNoob.json")
             )
         else:
             # Fallback or placeholder for other backends like NovelAI
-            self.backend = ComfyUIBackend()
+            raise NotImplementedError(f"Backend '{backend_name}' not implemented.")
 
     @commands.Cog.listener()
     async def on_ready(self):
         print(f"{os.path.basename(__file__)} is ready.")
+
+    def cog_unload(self):
+        if self.worker_task and not self.worker_task.done():
+            self.worker_task.cancel()
 
     @commands.command(help="Generate image/video using configured backend")
     async def paint(self, ctx, *, prompt=None):
@@ -52,35 +56,39 @@ class Paint(commands.Cog):
 
         await self.paint_queue.put((ctx, prompt_text, kwargs))
 
-        if self.processing_task is None or self.processing_task.done():
-            self.processing_task = self.bot.loop.create_task(self.process_paint_queue())
+    async def _paint_worker(self):
+        try:
+            while True:
+                ctx, prompt, kwargs = await self.paint_queue.get()
+                try:
+                    await self._handle_paint(ctx, prompt, kwargs)
+                except asyncio.TimeoutError:
+                    timeout_s = kwargs.get('timeout')
+                    await try_reply(ctx, f"Error: timed out after {timeout_s}s.")
+                except Exception as e:
+                    logging.error(f"Paint Error: {repr(e)}", exc_info=True)
+                    await try_reply(ctx, f"Error: {str(e)}")
+                finally:
+                    self.paint_queue.task_done()
+        except asyncio.CancelledError:
+            logging.info("Paint worker task cancelled.")
+            raise
 
-    async def process_paint_queue(self):
-        while not self.paint_queue.empty():
-            ctx, prompt, kwargs = await self.paint_queue.get()
-
-            try:
-                async with ctx.typing():
-                    results = await self.backend.paint(prompt, **kwargs)
-                    
-                    files = []
-                    for i, res in enumerate(results):
-                        data = res.get('data')
-                        ext = res.get('ext', 'png')
-                        if data:
-                            files.append(discord.File(io.BytesIO(data), filename=f"generation_{i}.{ext}"))
-                    
-                    if files:
-                        await try_reply(ctx, f"Generated for: `{prompt[:50]}...`", files=files)
-                    else:
-                        await try_reply(ctx, "No output generated.")
-
-            except asyncio.TimeoutError:
-                timeout_s = kwargs.get('timeout')
-                await try_reply(ctx, f"Error: timed out after {timeout_s}s.")
-            except Exception as e:
-                logging.error(f"Paint Error: {repr(e)}", exc_info=True)
-                await try_reply(ctx, f"Error: {str(e)}")
+    async def _handle_paint(self, ctx, prompt, kwargs):
+        async with ctx.typing():
+            results = await self.backend.paint(prompt, **kwargs)
+            
+            files = []
+            for i, res in enumerate(results):
+                data = res.get('data')
+                ext = res.get('ext', 'png')
+                if data:
+                    files.append(discord.File(io.BytesIO(data), filename=f"generation_{i}.{ext}"))
+            
+            if files:
+                await try_reply(ctx, f"Generated for: `{prompt[:50]}...`", files=files)
+            else:
+                await try_reply(ctx, "No output generated.")
 
     def _parse_prompt_and_kwargs(self, raw_input: str):
         parts = raw_input.split(' --')
