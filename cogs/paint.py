@@ -52,7 +52,7 @@ class Paint(commands.Cog):
         
         # Inject timeout from config if not present
         if 'timeout' not in kwargs:
-            kwargs['timeout'] = getattr(self.configs, 'paint_timeout', 120)
+            kwargs['timeout'] = getattr(self.configs, 'paint_timeout', 600)
 
         await self.paint_queue.put((ctx, prompt_text, kwargs))
 

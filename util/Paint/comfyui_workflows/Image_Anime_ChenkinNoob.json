@@ -270,7 +270,7 @@
     },
     "class_type": "PreviewImage",
     "_meta": {
-      "title": "Preview Image"
+      "title": "[OUTPUT:Image]"
     }
   }
 }
