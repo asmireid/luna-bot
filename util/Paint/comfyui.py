@@ -21,14 +21,21 @@ class ComfyUIBackend(PaintBackend):
         super().__init__(**kwargs)
         self.server_address = server_address
         self.client_id = str(uuid.uuid4())
+        self.comfyui_workflow_folder = comfyui_workflow_folder
 
         # Resolve workflow file path
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        potential_path = os.path.join(current_dir, comfyui_workflow_folder, workflow_file)
-        if os.path.exists(potential_path):
-            workflow_file = potential_path
+        # 1. Try relative to the project root (CWD)
+        # 2. Try relative to this file's directory (internal/default)
+        root_path = os.path.join(os.getcwd(), comfyui_workflow_folder, workflow_file)
+        local_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), comfyui_workflow_folder, workflow_file)
 
-        self.workflow_file = workflow_file
+        if os.path.exists(root_path):
+            self.workflow_file = root_path
+        elif os.path.exists(local_path):
+            self.workflow_file = local_path
+        else:
+            self.workflow_file = workflow_file
+
         self.workflow_vars, self.output_nodes, self.file_nodes = self._get_workflow_details(self.workflow_file)
 
     def _queue_prompt(self, prompt):
@@ -188,9 +195,14 @@ class ComfyUIBackend(PaintBackend):
     def list_workflows(self) -> List[str]:
         directory = os.path.dirname(self.workflow_file)
         if not directory or not os.path.exists(directory):
-            directory = os.path.dirname(os.path.abspath(__file__))
+            # Fallback search paths
+            for base in [os.getcwd(), os.path.dirname(os.path.abspath(__file__))]:
+                test_dir = os.path.join(base, self.comfyui_workflow_folder)
+                if os.path.exists(test_dir):
+                    directory = test_dir
+                    break
 
-        if os.path.exists(directory):
+        if directory and os.path.exists(directory):
             return sorted([f for f in os.listdir(directory) if f.endswith('.json')])
         return []
 

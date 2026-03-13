@@ -1,7 +1,7 @@
 {
   "4": {
     "inputs": {
-      "ckpt_name": "ChenkinNoobV2.safetensors"
+      "ckpt_name": "sd_xl_base_1.0.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
@@ -11,11 +11,11 @@
   "5": {
     "inputs": {
       "width": [
-        "106",
+        "57",
         0
       ],
       "height": [
-        "107",
+        "59",
         0
       ],
       "batch_size": [
@@ -121,7 +121,7 @@
     },
     "class_type": "easy int",
     "_meta": {
-      "title": "[VAR]ShortEdge"
+      "title": "[VAR]Width"
     }
   },
   "59": {
@@ -130,7 +130,7 @@
     },
     "class_type": "easy int",
     "_meta": {
-      "title": "[VAR]LongEdge"
+      "title": "[VAR]Height"
     }
   },
   "61": {
@@ -162,7 +162,7 @@
   },
   "79": {
     "inputs": {
-      "value": "(azz0422:0.4), (ask \\(askzy\\):0.7), (ratatatat74:0.4),(tianliang duohe fangdongye:0.4), 1girl, solo, shu \\(arknights\\), flat color, shiny skin, very awa, masterpiece, best quality, newest, absurdres, year 2025,"
+      "value": "POSITIVE_PROMPT_HERE"
     },
     "class_type": "PrimitiveString",
     "_meta": {
@@ -171,7 +171,7 @@
   },
   "80": {
     "inputs": {
-      "value": "low resolution, e621, Furry, old, bad quality,worst quality,worst detail,censor, messy hair,sketch, multiple views,"
+      "value": "NEGATIVE_PROMPTS_HERE"
     },
     "class_type": "PrimitiveString",
     "_meta": {
@@ -180,91 +180,17 @@
   },
   "81": {
     "inputs": {
-      "value": 4
+      "value": 5
     },
     "class_type": "PrimitiveFloat",
     "_meta": {
       "title": "[VAR]CFG"
     }
   },
-  "100": {
-    "inputs": {
-      "model_name": "2x-AnimeSharpV4_Fast_RCAN_PU.safetensors"
-    },
-    "class_type": "UpscaleModelLoader",
-    "_meta": {
-      "title": "Load Upscale Model"
-    }
-  },
-  "103": {
-    "inputs": {
-      "upscale_model": [
-        "100",
-        0
-      ],
-      "image": [
-        "17",
-        0
-      ]
-    },
-    "class_type": "ImageUpscaleWithModel",
-    "_meta": {
-      "title": "Upscale Image (using Model)"
-    }
-  },
-  "104": {
-    "inputs": {
-      "value": true
-    },
-    "class_type": "PrimitiveBoolean",
-    "_meta": {
-      "title": "[VAR]Portrait"
-    }
-  },
-  "106": {
-    "inputs": {
-      "switch": [
-        "104",
-        0
-      ],
-      "on_false": [
-        "59",
-        0
-      ],
-      "on_true": [
-        "57",
-        0
-      ]
-    },
-    "class_type": "LazySwitchKJ",
-    "_meta": {
-      "title": "Width"
-    }
-  },
-  "107": {
-    "inputs": {
-      "switch": [
-        "104",
-        0
-      ],
-      "on_false": [
-        "57",
-        0
-      ],
-      "on_true": [
-        "59",
-        0
-      ]
-    },
-    "class_type": "LazySwitchKJ",
-    "_meta": {
-      "title": "Height"
-    }
-  },
-  "108": {
+  "86": {
     "inputs": {
       "images": [
-        "103",
+        "17",
         0
       ]
     },
