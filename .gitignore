@@ -13,6 +13,8 @@ run.bat
 system_prompt.txt
 */summarize_prompt.txt
 summarize_prompt.txt
+*/jailbreak_prompt.txt
+jailbreak_prompt.txt
 */.DS_Store
 .DS_Store
 comfyui_workflows
