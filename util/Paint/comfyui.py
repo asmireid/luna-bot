@@ -8,6 +8,7 @@ import urllib.request
 import urllib.parse
 import asyncio
 import re
+import requests
 from typing import List, Dict, Any, Optional
 from .base import PaintBackend
 
@@ -28,7 +29,7 @@ class ComfyUIBackend(PaintBackend):
             workflow_file = potential_path
 
         self.workflow_file = workflow_file
-        self.workflow_vars, self.output_nodes = self._get_workflow_details(self.workflow_file)
+        self.workflow_vars, self.output_nodes, self.file_nodes = self._get_workflow_details(self.workflow_file)
 
     def _queue_prompt(self, prompt):
         p = {"prompt": prompt, "client_id": self.client_id}
@@ -143,13 +144,14 @@ class ComfyUIBackend(PaintBackend):
     def _get_workflow_details(self, workflow_path):
         if not os.path.exists(workflow_path):
             print(f"Workflow file not found: {workflow_path}")
-            return {}, {}
+            return {}, {}, {}
 
         with open(workflow_path, "r", encoding="utf-8") as f:
             workflow_data = json.load(f)
 
         variables = {}
         output_nodes = {}
+        file_nodes = {}
         for id, node in workflow_data.items():
             title = node.get('_meta', {'title': ''}).get('title', '')
             if title and title.startswith('[VAR]'):
@@ -163,9 +165,19 @@ class ComfyUIBackend(PaintBackend):
                 variables[var_name] = val
             else:
                 output_match = re.match(r'^\[OUTPUT:([^\]]+)\]', title or '', flags=re.IGNORECASE)
+                file_match = re.match(r'^\[FILE:([^:]+):(\d+)\]', title or '', flags=re.IGNORECASE)
                 if output_match:
                     output_nodes[id] = output_match.group(1).strip().lower() or 'any'
-        return variables, output_nodes
+                elif file_match:
+                    expected_type = file_match.group(1).strip().lower()
+                    order = int(file_match.group(2).strip())
+                    
+                    keys = []
+                    if node.get('inputs'):
+                        for key in node['inputs'].keys():
+                            keys.append(key)
+                    file_nodes[order] = (id, keys, expected_type)
+        return variables, output_nodes, file_nodes
 
     def get_variables(self) -> Dict[str, Any]:
         variables = {}
@@ -199,6 +211,60 @@ class ComfyUIBackend(PaintBackend):
 
         return prompt_workflow
 
+    def _upload_file(self, file_data: bytes, filename: str, fixed_name: str = None) -> str:
+        """Uploads a file to ComfyUI's input directory."""
+        url = f"http://{self.server_address}/upload/image"
+        
+        upload_name = fixed_name if fixed_name else filename
+        ext = os.path.splitext(filename)[1].lower()
+        content_type = 'application/octet-stream'
+        if ext in ['.png', '.jpg', '.jpeg', '.webp']:
+            content_type = f'image/{ext.lstrip(".")}'
+            if ext == '.jpg': content_type = 'image/jpeg'
+        elif ext in ['.mp4', '.webm', '.mov']:
+            content_type = f'video/{ext.lstrip(".")}'
+            
+        files = {
+            'image': (upload_name, file_data, content_type)
+        }
+        data = {'overwrite': 'true'}
+        
+        try:
+            response = requests.post(url, files=files, data=data)
+            if response.status_code == 200:
+                res_json = response.json()
+                return res_json.get('name', upload_name)
+            else:
+                print(f"ComfyUI File Upload Error: {response.text}")
+                return upload_name
+        except Exception as e:
+            print(f"ComfyUI File Upload Exception: {e}")
+            return upload_name
+
+    def _process_input_files(self, prompt_workflow: Dict, input_files: List[Dict]) -> None:
+        if not input_files or not hasattr(self, 'file_nodes') or not self.file_nodes:
+            return
+            
+        for order, (node_id, keys, expected_type) in self.file_nodes.items():
+            if order < len(input_files):
+                file_info = input_files[order]
+                ext = os.path.splitext(file_info['filename'])[1].lower()
+                fixed_name = f"lunabot_input_{order}{ext}"
+                uploaded_filename = self._upload_file(file_info['data'], file_info['filename'], fixed_name=fixed_name)
+                
+                if node_id in prompt_workflow and 'inputs' in prompt_workflow[node_id]:
+                    node_inputs = prompt_workflow[node_id]['inputs']
+                    target_key = None
+                    if 'image' in node_inputs:
+                        target_key = 'image'
+                    elif 'video' in node_inputs:
+                        target_key = 'video'
+                    elif len(keys) > 0:
+                        target_key = keys[0]
+                        
+                    if target_key:
+                        prompt_workflow[node_id]['inputs'][target_key] = uploaded_filename
+
     def _generate_sync(self, prompt: str, negative_prompt: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
         gen_kwargs = kwargs.copy()
 
@@ -209,6 +275,9 @@ class ComfyUIBackend(PaintBackend):
             gen_kwargs['NegativePrompt'] = [negative_prompt]
 
         prompt_workflow = self._generate_workflow_payload(self.workflow_file, **gen_kwargs)
+
+        input_files = gen_kwargs.get('input_files', [])
+        self._process_input_files(prompt_workflow, input_files)
 
         ws = websocket.WebSocket()
         try:

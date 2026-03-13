@@ -44,15 +44,32 @@ class Paint(commands.Cog):
 
     @commands.command(help="Generate image/video using configured backend")
     async def paint(self, ctx, *, prompt=None):
-        if not prompt:
-            await try_reply(ctx, "Please provide a prompt.")
+        if not prompt and not ctx.message.attachments:
+            await try_reply(ctx, "Please provide a prompt or an attachment.")
             return
 
-        prompt_text, kwargs = self._parse_prompt_and_kwargs(prompt)
+        prompt_text, kwargs = self._parse_prompt_and_kwargs(prompt or "")
         
         # Inject timeout from config if not present
         if 'timeout' not in kwargs:
             kwargs['timeout'] = getattr(self.configs, 'paint_timeout', 600)
+
+        # Handle file attachments
+        if ctx.message.attachments:
+            input_files = []
+            for attachment in ctx.message.attachments:
+                try:
+                    file_data = await attachment.read()
+                    input_files.append({
+                        'filename': attachment.filename,
+                        'data': file_data,
+                        'content_type': attachment.content_type
+                    })
+                except discord.HTTPException as e:
+                    logging.error(f"Failed to download attachment {attachment.filename}: {e}")
+                    await try_reply(ctx, f"Failed to download attachment {attachment.filename}.")
+                    return
+            kwargs['input_files'] = input_files
 
         await self.paint_queue.put((ctx, prompt_text, kwargs))
 
