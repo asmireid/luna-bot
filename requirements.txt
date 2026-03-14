@@ -5,3 +5,5 @@ google-genai
 openai
 yt-dlp
 websocket-client
+dpytest
+pytest
