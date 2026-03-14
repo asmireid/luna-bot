@@ -1,0 +1,37 @@
+name: Automated Testing
+
+# 1. The Trigger
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+# 2. The Jobs
+jobs:
+  test:
+    # 3. The Runner
+    runs-on: ubuntu-latest
+
+    # 4. The Steps
+    steps:
+      # Step A: Bring your repository's code into the runner
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step B: Install the language environment
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Step C: Install your project's dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      # Step D: Run the actual tests
+      - name: Run tests
+        run: |
+          pytest

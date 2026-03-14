@@ -5,3 +5,9 @@ google-genai
 openai
 yt-dlp
 websocket-client
+dpytest
+pytest
+pytest-mock
+pytest-asyncio
+pytest-anyio
+pillow
