@@ -7,3 +7,4 @@ yt-dlp
 websocket-client
 dpytest
 pytest
+pillow
