@@ -28,7 +28,7 @@ class LocalBackend(ChatBackend):
         for msg in ctx:
             content = {
                 'role': msg['role'],
-                'content': f"from {msg['name']}: {msg['content']}"
+                'content': f"[User: {msg['name']}]\n{msg['content']}"
             }
             api_context.append(content)
         

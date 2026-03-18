@@ -30,7 +30,7 @@ class OpenAILikeBackend(ChatBackend):
             if role == 'model':
                 role = 'assistant'
             
-            text_content = f"from {msg['name']}: {msg['content']}"
+            text_content = f"[User: {msg['name']}]\n{msg['content']}"
             images = msg.get('images', [])
 
             if images:

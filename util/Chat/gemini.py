@@ -38,7 +38,7 @@ class GeminiBackend(ChatBackend):
         for msg in ctx:
             content = {
                 'role': msg['role'],
-                'parts': [types.Part(text=f"from {msg['name']}: {msg['content']}")]
+                'parts': [types.Part(text=f"[User: {msg['name']}]\n{msg['content']}")]
             }
 
             images = msg.get('images', [])
