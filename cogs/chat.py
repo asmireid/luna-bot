@@ -66,18 +66,57 @@ class Chat(commands.Cog):
     async def process_chat_queue(self):
         while not self.chat_queue.empty():
             message, params, ctx = await self.chat_queue.get()
+            params['ctx'] = ctx  # Inject ctx for tools that might need it
+            
+            status_msg = None
+            tool_logs = ""
 
             try:
                 async with ctx.typing():
-                    response = await self.backend.chat(message, **params)
-                    await try_reply(ctx, response)
+                    async for update in self.backend.chat_stream(message, **params):
+                        
+                        if update["type"] == "status" and not status_msg:
+                            # Send initial thinking message
+                            status_msg = await try_reply(ctx, f"🤔 Thinking...")
+                            
+                        elif update["type"] == "tool_start":
+                            tool_logs += f"\n🛠️ Using `{update['tool_name']}`..."
+                            if status_msg:
+                                await status_msg.edit(content=f"🤔 Thinking...{tool_logs}")
+                                
+                        elif update["type"] == "tool_end":
+                            tool_logs += " ✅"
+                            if status_msg:
+                                await status_msg.edit(content=f"🤔 Thinking...{tool_logs}")
+                                
+                        elif update["type"] == "final":
+                            final_text = update["content"]
+                            # If we have tool logs, keep them above the final message. 
+                            # Otherwise, just edit to the final text.
+                            if tool_logs:
+                                final_content = f"{tool_logs}\n\n{final_text}"
+                            else:
+                                final_content = final_text
+                                
+                            if status_msg:
+                                await status_msg.edit(content=final_content)
+                            else:
+                                await try_reply(ctx, final_content)
 
             except asyncio.TimeoutError:
                 timeout_s = params.get('timeout')
-                await try_reply(ctx, f"Error: timed out after {timeout_s}s (retried once).")
+                error_msg = f"Error: timed out after {timeout_s}s (retried once)."
+                if status_msg:
+                    await status_msg.edit(content=error_msg)
+                else:
+                    await try_reply(ctx, error_msg)
             except Exception as e:
                 logging.error(f"Chat Error: {repr(e)}", exc_info=True)
-                await try_reply(ctx, f"Error: {str(e)}")
+                error_msg = f"Error: {str(e)}"
+                if status_msg:
+                    await status_msg.edit(content=error_msg)
+                else:
+                    await try_reply(ctx, error_msg)
 
     @commands.command(aliases=['清空', "忘记一切"], help="clears chat history")
     async def reset_chat(self, ctx):

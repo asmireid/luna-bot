@@ -1,7 +1,8 @@
 import asyncio
+import json
 import requests
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple, Any
 from google import genai
 from google.genai import types
 from .base import ChatBackend
@@ -21,7 +22,7 @@ class GeminiBackend(ChatBackend):
         self.client = genai.Client(api_key=api_key, http_options=http_options)
         self.model = model
 
-    async def _generate_reply(self, context: Optional[List[Dict[str, str]]] = None, use_system_prompt:bool = True, **kwargs) -> str:
+    async def _generate_reply(self, context: Optional[List[Dict[str, Any]]] = None, use_system_prompt:bool = True, **kwargs) -> Any:
         # Construct prompt from context
         full_prompt = []
         system_instruction = self.system_prompt
@@ -30,43 +31,70 @@ class GeminiBackend(ChatBackend):
         if self.memory:
             memory = {
                 'role': 'model',
-                'parts': [{"text":f"Memory: {self.memory}"}]
+                'parts': [types.Part.from_text(text=f"Memory: {self.memory}")]
             }
             full_prompt.append(memory)
 
         ctx = context if context is not None else self.context
         for msg in ctx:
-            content = {
-                'role': msg['role'],
-                'parts': [types.Part(text=f"[User: {msg['name']}]\n{msg['content']}")]
-            }
+            role = msg['role']
+            
+            if role == 'tool_call':
+                if msg.get('raw'):
+                    part = msg['raw']
+                else:
+                    try:
+                        args = json.loads(msg['content'])
+                    except Exception:
+                        args = {}
+                    part = types.Part.from_function_call(name=msg['name'], args=args)
+                content = {'role': 'model', 'parts': [part]}
+                
+            elif role == 'tool_result':
+                part = types.Part.from_function_response(name=msg['name'], response={"result": msg['content']})
+                content = {'role': 'user', 'parts': [part]}
+                
+            else:
+                gemini_role = 'model' if role == 'model' else 'user'
+                prefix = f"[User: {msg['name']}]\n" if gemini_role == 'user' else ""
+                part = types.Part.from_text(text=f"{prefix}{msg['content']}")
+                content = {'role': gemini_role, 'parts': [part]}
 
-            images = msg.get('images', [])
-            for image in images:
-                content['parts'].append(
-                    types.Part.from_bytes(
-                            data=image['data'],
-                            mime_type=image['mime_type'],
-                        ),
-                )
+                images = msg.get('images', [])
+                for image in images:
+                    content['parts'].append(
+                        types.Part.from_bytes(
+                                data=image['data'],
+                                mime_type=image['mime_type'],
+                            )
+                    )
             full_prompt.append(content)
 
         # Add jailbreak prompt
         if self.jailbreak_prompt:
             jb = {
                 'role': "model",
-                'parts': [types.Part(text=self.jailbreak_prompt)]
+                'parts': [types.Part.from_text(text=self.jailbreak_prompt)]
             }
-
             full_prompt.append(jb)
 
         loop = asyncio.get_running_loop()
-        config = genai.types.GenerateContentConfig(
-            top_k=kwargs.get("top_k"),
-            top_p=kwargs.get("top_p"),
-            temperature=kwargs.get("temperature"),
-            max_output_tokens=kwargs.get("max_new_tokens"),
-            system_instruction=system_instruction) if use_system_prompt and system_instruction else None
+        
+        # Format tools for Google GenAI
+        tool_schemas = kwargs.get("tools")
+        genai_tools = [{"function_declarations": tool_schemas}] if tool_schemas else None
+
+        config_kwargs = {
+            "top_k": kwargs.get("top_k"),
+            "top_p": kwargs.get("top_p"),
+            "temperature": kwargs.get("temperature"),
+            "max_output_tokens": kwargs.get("max_new_tokens"),
+            "tools": genai_tools
+        }
+        if use_system_prompt and system_instruction:
+            config_kwargs["system_instruction"] = system_instruction
+            
+        config = genai.types.GenerateContentConfig(**config_kwargs)
 
         # Run synchronous SDK call in executor
         response = await loop.run_in_executor(
@@ -74,5 +102,18 @@ class GeminiBackend(ChatBackend):
             lambda: self.client.models.generate_content(model=self.model, contents=full_prompt, config=config)
         )
         
-        reply = response.text
-        return reply
+        return response
+
+    def _is_tool_call(self, reply_obj: Any) -> bool:
+        return bool(reply_obj.function_calls)
+
+    def _extract_tool_info(self, reply_obj: Any) -> Tuple[str, dict, Any]:
+        for part in reply_obj.candidates[0].content.parts:
+            if part.function_call:
+                fc = part.function_call
+                args = fc.args if isinstance(fc.args, dict) else dict(fc.args)
+                return fc.name, args, part
+        return "", {}, None
+
+    def _extract_text(self, reply_obj: Any) -> str:
+        return reply_obj.text or ""
