@@ -55,19 +55,58 @@ class ChatBackend(ABC):
 
     @abstractmethod
     async def _generate_reply(self, context: Optional[List[Dict[str, Any]]] = None, use_system_prompt: bool = True, **kwargs) -> Any:
-        """Generates a reply based on the message and internal context."""
+        """
+        Sends the current context to the specific LLM API and returns the raw API response object.
+        
+        This method must handle:
+        - Constructing the final prompt from the `context` history (which includes standard messages and tool calls/results).
+        - Formatting and passing `kwargs.get('tools')` to the underlying API.
+        - Making the actual network request or local inference call.
+        
+        :param context: The conversation history to send. If None, uses `self.context`.
+        :param use_system_prompt: Whether to prepend the system prompt to the context.
+        :param kwargs: Additional API configuration parameters (e.g., temperature, max_new_tokens, tools).
+        :return: The raw response object directly from the LLM provider's client.
+        """
         pass
 
     @abstractmethod
     def _is_tool_call(self, reply_obj: Any) -> bool:
+        """
+        Determines if the raw API response object represents a request to call a tool.
+        
+        :param reply_obj: The raw response object returned by `_generate_reply`.
+        :return: True if the model wants to call a tool, False if it just returned text.
+        """
         pass
 
     @abstractmethod
     def _extract_tool_info(self, reply_obj: Any) -> Tuple[str, dict, Any]:
+        """
+        Extracts tool execution details from a raw API response object that requested a tool call.
+        
+        :param reply_obj: The raw response object returned by `_generate_reply`.
+        :return: A tuple containing:
+                 1. (str) The name of the tool/function to call.
+                 2. (dict) The arguments to pass to the tool.
+                 3. (Any) The raw, unmodified message/part object representing the tool call intent. 
+                    This is crucial to preserve provider-specific IDs (like OpenAI's tool_call_id) 
+                    or signatures (like Gemini's thought_signature) so they can be injected 
+                    back into the context history for the next loop iteration.
+        """
         pass
 
     @abstractmethod
     def _extract_text(self, reply_obj: Any) -> str:
+        """
+        Extracts the final text content from a raw API response object.
+        
+        This is called when `_is_tool_call` returns False, signifying the model has finished 
+        its thought process and provided a standard conversational reply.
+        
+        :param reply_obj: The raw response object returned by `_generate_reply`.
+        :return: The string text to send back to the user.
+        """
         pass
 
     async def chat_stream(self, message: str, **kwargs):

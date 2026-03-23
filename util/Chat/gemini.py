@@ -41,8 +41,10 @@ class GeminiBackend(ChatBackend):
             
             if role == 'tool_call':
                 if msg.get('raw'):
+                    # Use the exact funciton call part stored in history
                     part = msg['raw']
                 else:
+                    # We shouldn't get here!
                     try:
                         args = json.loads(msg['content'])
                     except Exception:
