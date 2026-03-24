@@ -22,7 +22,7 @@ async def test_gemini_generate_reply(mocker):
     # generate_content runs in an executor, but we mocked genai.Client
     reply = await backend._generate_reply(context=context, use_system_prompt=False)
     
-    assert reply == "This is a mocked Gemini response"
+    assert reply == mock_response
     
     # Verify the mock was called correctly
     mock_client.models.generate_content.assert_called_once()
