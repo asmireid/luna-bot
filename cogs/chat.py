@@ -130,15 +130,40 @@ class Chat(commands.Cog):
             await try_reply(ctx, f"No context yet.")
             return
 
-        msg_embed = make_embed(ctx, title=f"{Config().bot_name}'s Chat", descr=f"Displaying stored context.")
+        msg_embed = make_embed(ctx, title=f"{Config().bot_name}'s Chat History", descr=f"Displaying stored context.")
 
         if self.backend.memory:
-            msg_embed.add_field(name="Memory", value=trim_embed_value(self.backend.memory), inline=False)
+            msg_embed.add_field(name="🧠 Memory", value=trim_embed_value(self.backend.memory), inline=False)
 
         for m in self.backend.context:
-            name = m.get("name") or m.get("role", "unknown")
-            content = m.get("content", "")
-            msg_embed.add_field(name=name, value=trim_embed_value(content), inline=False)
+            role = m.get('role')
+            name = m.get('name') or role
+            content = m.get('content', '')
+            images = m.get('images', [])
+            
+            field_name = name
+            field_value = content
+            
+            if role == 'tool_call':
+                field_name = f"🛠️ Tool Call: {name}"
+                field_value = f"Arguments: {content}"
+            elif role == 'tool_result':
+                field_name = f"✅ Tool Result: {name}"
+                field_value = f"Output: {content}"
+            elif role == 'model':
+                field_name = f"🤖 {name}"
+            elif role == 'user':
+                field_name = f"👤 {name}"
+            
+            if images:
+                image_info = ", ".join([img.get('name', 'image') for img in images])
+                field_value = f"🖼️ [{len(images)} Image(s): {image_info}]\n{field_value}"
+            
+            if len(msg_embed.fields) >= 25:
+                msg_embed.set_footer(text=f"{Config().embed_footer} | (Context truncated to last 25 items)")
+                break
+                
+            msg_embed.add_field(name=field_name, value=trim_embed_value(field_value) if field_value else "(No content)", inline=False)
 
         await try_reply(ctx, msg_embed)
 
