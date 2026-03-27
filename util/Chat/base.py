@@ -113,6 +113,7 @@ class ChatBackend(ABC):
         """
         An async generator that yields status updates, tool executions, and finally the text response.
         """
+        await chat_tools.ensure_ready()
         tools_schema = chat_tools.get_schemas()
 
         print(f"Chat: received message: {message}")
@@ -144,11 +145,12 @@ class ChatBackend(ABC):
 
                 # Execute the tool, passing kwargs (which may contain the Discord ctx)
                 result = await chat_tools.execute_tool(tool_name, tool_args, context_kwargs=kwargs)
+                result_text = result.as_text()
                 
                 # Record the tool's result
-                await self.add_context('tool_result', str(result), tool_name)
+                await self.add_context('tool_result', result_text, tool_name)
                 
-                yield {"type": "tool_end", "tool_name": tool_name, "result": result}
+                yield {"type": "tool_end", "tool_name": tool_name, "result": result_text}
             else:
                 reply_text = self._extract_text(reply_obj)
                 await self.add_context('model', reply_text, self.bot_name)
