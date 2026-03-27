@@ -18,7 +18,24 @@ class GeminiBackend(ChatBackend):
                 jailbreak_prompt: str = None,
                 bot_name: str = "Luna"):
         super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, summarize_prompt=summarize_prompt, jailbreak_prompt=jailbreak_prompt, bot_name=bot_name)
-        http_options = {'base_url': proxy_url} if proxy_url else None
+        
+        http_options = None
+        if proxy_url:
+            # Ensure the API key is passed correctly when using a proxy.
+            # Many proxies expect the 'key' query parameter (standard Gemini API)
+            # or 'Authorization: Bearer' (common for OpenAI-compatible bridges).
+            headers = {}
+            client_args = {}
+            if api_key:
+                headers['Authorization'] = f'Bearer {api_key}'
+                client_args['params'] = {'key': api_key}
+            
+            http_options = types.HttpOptions(
+                base_url=proxy_url,
+                headers=headers,
+                client_args=client_args
+            )
+
         self.client = genai.Client(api_key=api_key, http_options=http_options)
         self.model = model
 
