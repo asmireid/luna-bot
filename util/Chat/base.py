@@ -148,7 +148,7 @@ class ChatBackend(ABC):
                 result_text = result.as_text()
                 
                 # Record the tool's result
-                await self.add_context('tool_result', result_text, tool_name)
+                await self.add_context('tool_result', result_text, tool_name, raw=raw_part)
                 
                 yield {"type": "tool_end", "tool_name": tool_name, "result": result_text}
             else:

@@ -58,7 +58,7 @@ class OpenAILikeBackend(ChatBackend):
                 # (or we can extract it if we pass it properly)
                 messages.append({
                     "role": "tool",
-                    "tool_call_id": msg['name'], # We will store the ID in 'name' during tool_result in extract
+                    "tool_call_id": msg['raw']['tool_calls'][0]['id'], # We will store the ID in 'name' during tool_result in extract
                     "content": msg['content']
                 })
                 
@@ -122,16 +122,10 @@ class OpenAILikeBackend(ChatBackend):
             
         # The raw part needs to be the exact dictionary representation of the assistant's message
         raw_msg = message.model_dump()
-        # Ensure we don't pass back nulls that might upset the API
-        if "function_call" in raw_msg and raw_msg["function_call"] is None:
-            del raw_msg["function_call"]
-            
-        # Pass the ID as part of the returned name or in the raw so we can use it for the result.
-        # Actually, let's inject it into the name as "name|id" or just return the ID so base.py can use it.
-        # But base.py doesn't know about IDs. A trick is to return the ID as the "name" for the result.
-        # Wait, if we return `tool_call.id` as part of the tool_name? No, tool execution will fail.
-        # Let's attach the ID to the raw dictionary so we can retrieve it later, 
-        # BUT for the actual result context, we need to store the ID.
+        # print(raw_msg)
+        # # Ensure we don't pass back nulls that might upset the API
+        # if "function_call" in raw_msg and raw_msg["function_call"] is None:
+        #     del raw_msg["function_call"]
         
         return name, args, raw_msg
 

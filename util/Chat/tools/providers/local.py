@@ -20,7 +20,7 @@ class LocalToolProvider(ToolProvider):
 
     def register(self, name: str, description: str, parameters: dict | None):
         def decorator(func: Callable[..., Any]):
-            qualified_name = f"{self.provider_id}.{name}"
+            qualified_name = f"{self.provider_id}-{name}"
             self._functions[qualified_name] = func
             self._specs[qualified_name] = ToolSpec(
                 name=qualified_name,

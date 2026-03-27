@@ -25,7 +25,7 @@ class MCPToolProvider(ToolProvider):
         refreshed: dict[str, ToolSpec] = {}
         for tool in remote_tools:
             remote_name = tool["name"]
-            qualified_name = f"{self.provider_id}.{remote_name}"
+            qualified_name = f"{self.provider_id}-{remote_name}"
             refreshed[qualified_name] = ToolSpec(
                 name=qualified_name,
                 qualified_name=qualified_name,
