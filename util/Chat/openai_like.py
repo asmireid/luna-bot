@@ -71,10 +71,10 @@ class OpenAILikeBackend(ChatBackend):
                     content_parts = [{"type": "text", "text": text_content}]
                     for img in images:
                         b64_data = base64.b64encode(img['data']).decode('utf-8')
-                        mime_type = img['mime_type']
+                        content_type = img['content_type']
                         content_parts.append({
                             "type": "image_url",
-                            "image_url": {"url": f"data:{mime_type};base64,{b64_data}"}
+                            "image_url": {"url": f"data:{content_type};base64,{b64_data}"}
                         })
                     messages.append({'role': openai_role, 'content': content_parts})
                 else:

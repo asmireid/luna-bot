@@ -43,9 +43,9 @@ class Chat(commands.Cog):
 
                 if mime_type and mime_type.startswith('image/'):
                     images.append({
-                        'name': attachment.filename,
+                        'filename': attachment.filename,
                         'data': await attachment.read(),
-                        'mime_type': mime_type,
+                        'content_type': mime_type,
                     })
         configs = Config()
         params = {
@@ -156,7 +156,7 @@ class Chat(commands.Cog):
                 field_name = f"👤 {name}"
             
             if images:
-                image_info = ", ".join([img.get('name', 'image') for img in images])
+                image_info = ", ".join([img.get('filename', 'image') for img in images])
                 field_value = f"🖼️ [{len(images)} Image(s): {image_info}]\n{field_value}"
             
             if len(msg_embed.fields) >= 25:

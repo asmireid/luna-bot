@@ -84,7 +84,7 @@ class GeminiBackend(ChatBackend):
                     content['parts'].append(
                         types.Part.from_bytes(
                                 data=image['data'],
-                                mime_type=image['mime_type'],
+                                mime_type=image['content_type'],
                             )
                     )
             full_prompt.append(content)
