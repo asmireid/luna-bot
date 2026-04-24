@@ -175,7 +175,8 @@ class AssetStore:
             return asset_id in self._assets
 
     def _make_asset_id(self, kind: AssetKind) -> str:
-        return f"{kind[:3]}_{uuid.uuid4().hex}"
+        prefix = {"image": "img", "file": "fil"}[kind]
+        return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
     def _write_asset_file(self, asset_id: str, filename: str | None, mime_type: str | None, data: bytes) -> str:
         suffix = self._guess_suffix(filename, mime_type)

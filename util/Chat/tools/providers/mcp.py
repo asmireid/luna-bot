@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import base64
-
 from ..mcp.client import MCPClient
 from ..provider import ToolProvider
 from ..types import ProviderHealth, ToolExecutionContext, ToolResult, ToolSpec
+from util.Media.adapter import normalize_tool_result, resolve_tool_arguments
 
 
 class MCPToolProvider(ToolProvider):
@@ -62,73 +61,32 @@ class MCPToolProvider(ToolProvider):
                 tool_name=qualified_name,
             )
 
-        response = await self.client.call_tool(spec.remote_name, arguments)
-        is_error = bool(response.get("isError"))
-        content = response.get("content")
-
-        files = []
-        if isinstance(content, list):
-            flattened = []
-            for item in content:
-                if isinstance(item, dict):
-                    file_ref = await self._extract_asset_ref(item, ctx)
-                    if file_ref is not None:
-                        files.append(file_ref)
-                        flattened.append(f"[Attached file: {file_ref.filename or file_ref.asset_id}]")
-                        continue
-                    text = item.get("text")
-                    if text is not None:
-                        flattened.append(text)
-                    else:
-                        flattened.append(str(item))
-                else:
-                    flattened.append(str(item))
-            content_text = "\n".join(flattened)
-        else:
-            content_text = "" if content is None else str(content)
-
-        return ToolResult(
-            ok=not is_error,
-            content=content_text,
-            structured_content=response if isinstance(response, dict) else None,
-            files=files,
-            error=content_text if is_error else None,
+        resolved_arguments = await resolve_tool_arguments(arguments, ctx.asset_store, self.provider_type)
+        response = await self.client.call_tool(spec.remote_name, resolved_arguments)
+        normalized = await normalize_tool_result(
+            {
+                "ok": not bool(response.get("isError")),
+                "content": response.get("content"),
+                "structured_content": response if isinstance(response, dict) else None,
+                "error": response.get("content") if bool(response.get("isError")) else None,
+            },
+            asset_store=ctx.asset_store,
             provider_id=self.provider_id,
             tool_name=qualified_name,
+            source=f"{self.provider_id}:{spec.remote_name}",
         )
-
-    async def _extract_asset_ref(self, item: dict, ctx: ToolExecutionContext):
-        asset_store = ctx.asset_store
-        if asset_store is None:
-            return None
-
-        item_type = item.get("type")
-        if item_type == "image" and item.get("data"):
-            mime_type = item.get("mimeType") or "image/png"
-            data = base64.b64decode(item["data"])
-            return await asset_store.put_bytes(
-                data,
-                mime_type,
-                kind="image",
-                filename=item.get("filename"),
-                source="mcp",
-            )
-
-        if item_type == "resource":
-            resource = item.get("resource") or {}
-            blob = resource.get("blob")
-            if blob is None:
-                return None
-            mime_type = resource.get("mimeType") or "application/octet-stream"
-            kind = "image" if mime_type.startswith("image/") else "file"
-            data = base64.b64decode(blob)
-            return await asset_store.put_bytes(
-                data,
-                mime_type,
-                kind=kind,
-                filename=resource.get("filename"),
-                source=resource.get("uri") or "mcp",
-                metadata={"uri": resource.get("uri")},
-            )
-
-        return None
+        if isinstance(normalized.content, list):
+            flattened = []
+            for item in normalized.content:
+                if isinstance(item, dict) and "text" in item:
+                    flattened.append(str(item["text"]))
+                else:
+                    flattened.append(str(item))
+            normalized.content = "\n".join(flattened)
+        elif normalized.content is None:
+            normalized.content = ""
+        elif not isinstance(normalized.content, str):
+            normalized.content = str(normalized.content)
+        if normalized.error is not None and not isinstance(normalized.error, str):
+            normalized.error = str(normalized.error)
+        return normalized

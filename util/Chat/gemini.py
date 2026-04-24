@@ -83,6 +83,13 @@ class GeminiBackend(ChatBackend):
                 files = await self.resolve_context_files(msg, asset_store)
                 for file_info in files:
                     content_type = file_info.get('content_type') or "application/octet-stream"
+                    asset_id = file_info.get('asset_id') or "unknown"
+                    filename = file_info.get('filename') or asset_id or "file"
+                    content['parts'].append(
+                        types.Part.from_text(
+                            text=f"[Attached file: {filename}; asset_id={asset_id}; mime_type={content_type}]"
+                        )
+                    )
                     if content_type.startswith("image/") and file_info.get('data') is not None:
                         content['parts'].append(
                             types.Part.from_bytes(
@@ -91,7 +98,6 @@ class GeminiBackend(ChatBackend):
                             )
                         )
                     else:
-                        filename = file_info.get('filename') or file_info.get('asset_id') or "file"
                         content['parts'].append(
                             types.Part.from_text(text=f"[Attached file: {filename} ({content_type})]")
                         )
@@ -123,6 +129,7 @@ class GeminiBackend(ChatBackend):
             
         config = genai.types.GenerateContentConfig(**config_kwargs)
 
+        print(full_prompt)
         # Run synchronous SDK call in executor
         response = await loop.run_in_executor(
             None,

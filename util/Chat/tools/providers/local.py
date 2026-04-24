@@ -7,7 +7,7 @@ from typing import Any, Callable
 from ..discovery import discover_local_tool_modules
 from ..provider import ToolProvider
 from ..types import ProviderHealth, ToolExecutionContext, ToolResult, ToolSpec
-from util.Media.types import AssetRef
+from util.Media.adapter import normalize_tool_result, resolve_tool_arguments
 
 
 class LocalToolProvider(ToolProvider):
@@ -67,16 +67,10 @@ class LocalToolProvider(ToolProvider):
                 tool_name=qualified_name,
             )
 
-        call_args = dict(arguments)
+        call_args = await resolve_tool_arguments(dict(arguments), ctx.asset_store, self.provider_type)
         sig = inspect.signature(func)
         for param_name in sig.parameters:
-            if param_name == "tool_ctx" and param_name not in call_args:
-                call_args[param_name] = ctx
-            elif param_name == "execution_context" and param_name not in call_args:
-                call_args[param_name] = ctx
-            elif param_name == "asset_store" and ctx.asset_store is not None and param_name not in call_args:
-                call_args[param_name] = ctx.asset_store
-            elif ctx.raw_context:
+            if ctx.raw_context:
                 if param_name == "ctx" and ctx.discord_ctx is not None and param_name not in call_args:
                     call_args[param_name] = ctx.discord_ctx
                 elif param_name in ctx.raw_context and param_name not in call_args:
@@ -87,7 +81,13 @@ class LocalToolProvider(ToolProvider):
                 result = await func(**call_args)
             else:
                 result = func(**call_args)
-            return self._normalize_result(result, qualified_name)
+            return await normalize_tool_result(
+                result,
+                asset_store=ctx.asset_store,
+                provider_id=self.provider_id,
+                tool_name=qualified_name,
+                source=f"{self.provider_id}:{qualified_name}",
+            )
         except Exception as exc:
             logging.error("Error executing tool '%s': %s", qualified_name, exc, exc_info=True)
             return ToolResult(
@@ -97,49 +97,3 @@ class LocalToolProvider(ToolProvider):
                 provider_id=self.provider_id,
                 tool_name=qualified_name,
             )
-
-    def _normalize_result(self, result: Any, qualified_name: str) -> ToolResult:
-        if isinstance(result, ToolResult):
-            if result.provider_id is None:
-                result.provider_id = self.provider_id
-            if result.tool_name is None:
-                result.tool_name = qualified_name
-            return result
-
-        if isinstance(result, AssetRef):
-            return ToolResult(
-                ok=True,
-                content=f"Stored file asset '{result.asset_id}'.",
-                files=[result],
-                provider_id=self.provider_id,
-                tool_name=qualified_name,
-            )
-
-        if isinstance(result, list) and all(isinstance(item, AssetRef) for item in result):
-            asset_refs = list(result)
-            return ToolResult(
-                ok=True,
-                content=f"Stored {len(asset_refs)} file(s).",
-                files=asset_refs,
-                provider_id=self.provider_id,
-                tool_name=qualified_name,
-            )
-
-        if isinstance(result, dict) and {"ok", "content", "error", "structured_content", "files", "metadata"} & set(result.keys()):
-            return ToolResult(
-                ok=result.get("ok", True),
-                content=result.get("content"),
-                structured_content=result.get("structured_content"),
-                files=list(result.get("files", [])),
-                error=result.get("error"),
-                provider_id=self.provider_id,
-                tool_name=qualified_name,
-                metadata=dict(result.get("metadata", {})),
-            )
-
-        return ToolResult(
-            ok=True,
-            content=result,
-            provider_id=self.provider_id,
-            tool_name=qualified_name,
-        )

@@ -35,11 +35,10 @@ class OpenAILikeBackend(ChatBackend):
             role = msg['role']
             
             if role == 'tool_call':
-                if msg.get('raw'):
+                if isinstance(msg.get('raw'), dict) and msg['raw'].get('tool_calls'):
                     messages.append(msg['raw'])
                 else:
-                    # Fallback if no raw message (e.g. older history)
-                    # OpenAI requires a tool_call_id, so this might fail if not present.
+                    # Fallback for older history or foreign backend-specific raw objects.
                     messages.append({
                         "role": "assistant",
                         "content": None,
@@ -54,14 +53,19 @@ class OpenAILikeBackend(ChatBackend):
                     })
                     
             elif role == 'tool_result':
-                # OpenAI uses 'tool' role for results and requires the matching tool_call_id
-                # We expect the tool_call_id to be stored in the 'name' field for this specific role 
-                # (or we can extract it if we pass it properly)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": msg['raw']['tool_calls'][0]['id'], # We will store the ID in 'name' during tool_result in extract
-                    "content": msg['content']
-                })
+                raw = msg.get('raw')
+                if isinstance(raw, dict) and raw.get('tool_calls'):
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": raw['tool_calls'][0]['id'],
+                        "content": msg['content']
+                    })
+                else:
+                    # If this history came from a different backend, degrade it to plain assistant text.
+                    messages.append({
+                        "role": "assistant",
+                        "content": f"[Tool Result: {msg['name']}]\n{msg['content']}"
+                    })
                 
             else:
                 openai_role = 'assistant' if role == 'model' else 'user'
@@ -72,6 +76,12 @@ class OpenAILikeBackend(ChatBackend):
                     content_parts = [{"type": "text", "text": text_content}]
                     for file_info in files:
                         content_type = file_info.get('content_type') or "application/octet-stream"
+                        asset_id = file_info.get('asset_id') or "unknown"
+                        filename = file_info.get('filename') or asset_id or "file"
+                        content_parts.append({
+                            "type": "text",
+                            "text": f"[Attached file: {filename}; asset_id={asset_id}; mime_type={content_type}]"
+                        })
                         if content_type.startswith("image/") and file_info.get('data') is not None:
                             b64_data = base64.b64encode(file_info['data']).decode('utf-8')
                             content_parts.append({
@@ -79,7 +89,6 @@ class OpenAILikeBackend(ChatBackend):
                                 "image_url": {"url": f"data:{content_type};base64,{b64_data}"}
                             })
                         else:
-                            filename = file_info.get('filename') or file_info.get('asset_id') or "file"
                             content_parts.append({
                                 "type": "text",
                                 "text": f"[Attached file: {filename} ({content_type})]"
@@ -103,7 +112,7 @@ class OpenAILikeBackend(ChatBackend):
             ]
 
         # Use the async client directly since we instantiated AsyncOpenAI
-        resp = await self.client.chat.completions.create(
+        raw_response = await self.client.chat.completions.with_raw_response.create(
             model=self.model,
             messages=messages,
             max_tokens=kwargs.get("max_new_tokens"),
@@ -111,15 +120,28 @@ class OpenAILikeBackend(ChatBackend):
             top_p=kwargs.get("top_p"),
             tools=openai_tools
         )
+        parsed = raw_response.parse()
+        raw_json = {}
+        raw_text = getattr(raw_response, "text", None)
+        if callable(raw_text):
+            raw_text = raw_text()
+        if isinstance(raw_text, str):
+            try:
+                raw_json = json.loads(raw_text)
+            except json.JSONDecodeError:
+                raw_json = {}
 
-        return resp
+        return {
+            "parsed": parsed,
+            "raw_json": raw_json,
+        }
 
     def _is_tool_call(self, reply_obj: Any) -> bool:
-        message = reply_obj.choices[0].message
+        message = reply_obj["parsed"].choices[0].message
         return bool(getattr(message, "tool_calls", None))
 
     def _extract_tool_info(self, reply_obj: Any) -> Tuple[str, dict, Any]:
-        message = reply_obj.choices[0].message
+        message = reply_obj["parsed"].choices[0].message
         tool_call = message.tool_calls[0]
         
         name = tool_call.function.name
@@ -128,15 +150,14 @@ class OpenAILikeBackend(ChatBackend):
         except Exception:
             args = {}
             
-        # The raw part needs to be the exact dictionary representation of the assistant's message
-        raw_msg = message.model_dump()
-        # print(raw_msg)
-        # # Ensure we don't pass back nulls that might upset the API
-        # if "function_call" in raw_msg and raw_msg["function_call"] is None:
-        #     del raw_msg["function_call"]
+        raw_msg = (
+            reply_obj.get("raw_json", {})
+            .get("choices", [{}])[0]
+            .get("message")
+        ) or message.model_dump()
         
         return name, args, raw_msg
 
     def _extract_text(self, reply_obj: Any) -> str:
-        text = reply_obj.choices[0].message.content
+        text = reply_obj["parsed"].choices[0].message.content
         return text or ""
