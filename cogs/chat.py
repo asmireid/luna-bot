@@ -6,6 +6,7 @@ from discord.ext import commands
 
 from utilities import *
 from util.Chat.backend_factory import create_backend
+from util.Media import get_or_create_asset_store
 
 class Chat(commands.Cog):
     def __init__(self, bot):
@@ -36,17 +37,24 @@ class Chat(commands.Cog):
         if message is None:
             message = ""
 
-        images = []
+        asset_store = get_or_create_asset_store(ctx.bot)
+        files = []
         if ctx.message.attachments:
             for attachment in ctx.message.attachments:
                 mime_type = attachment.content_type or mimetypes.guess_type(attachment.filename)[0]
-
-                if mime_type and mime_type.startswith('image/'):
-                    images.append({
-                        'filename': attachment.filename,
-                        'data': await attachment.read(),
-                        'content_type': mime_type,
-                    })
+                if not mime_type:
+                    mime_type = "application/octet-stream"
+                data = await attachment.read()
+                kind = 'image' if mime_type.startswith('image/') else 'file'
+                ref = await asset_store.put_bytes(
+                    data,
+                    mime_type,
+                    kind=kind,
+                    filename=attachment.filename,
+                    source='discord',
+                    metadata={'attachment_url': getattr(attachment, 'url', None)},
+                )
+                files.append(ref)
         configs = Config()
         params = {
             'temperature': configs.temperature, 
@@ -54,7 +62,8 @@ class Chat(commands.Cog):
             'top_k': configs.top_k,
             'max_new_tokens': configs.max_new_tokens,
             'author_name': ctx.author.nick or ctx.author.name,
-            'images': images,
+            'files': files,
+            'asset_store': asset_store,
             'timeout': configs.timeout
         }
         # print(params)
@@ -139,7 +148,9 @@ class Chat(commands.Cog):
             role = m.get('role')
             name = m.get('name') or role
             content = m.get('content', '')
-            images = m.get('images', [])
+            files = m.get('files')
+            if files is None:
+                files = m.get('images', [])
             
             field_name = name
             field_value = content
@@ -155,9 +166,14 @@ class Chat(commands.Cog):
             elif role == 'user':
                 field_name = f"👤 {name}"
             
-            if images:
-                image_info = ", ".join([img.get('filename', 'image') for img in images])
-                field_value = f"🖼️ [{len(images)} Image(s): {image_info}]\n{field_value}"
+            if files:
+                file_names = []
+                for file_info in files:
+                    if hasattr(file_info, 'filename'):
+                        file_names.append(file_info.filename or getattr(file_info, 'asset_id', 'file'))
+                    else:
+                        file_names.append(file_info.get('filename', file_info.get('asset_id', 'file')))
+                field_value = f"📎 [{len(files)} File(s): {', '.join(file_names)}]\n{field_value}"
             
             if len(msg_embed.fields) >= 25:
                 msg_embed.set_footer(text=f"{Config().embed_footer} | (Context truncated to last 25 items)")

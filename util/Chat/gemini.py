@@ -53,6 +53,7 @@ class GeminiBackend(ChatBackend):
             full_prompt.append(memory)
 
         ctx = context if context is not None else self.context
+        asset_store = kwargs.get("asset_store")
         for msg in ctx:
             role = msg['role']
             
@@ -79,14 +80,21 @@ class GeminiBackend(ChatBackend):
                 part = types.Part.from_text(text=f"{prefix}{msg['content']}")
                 content = {'role': gemini_role, 'parts': [part]}
 
-                images = msg.get('images', [])
-                for image in images:
-                    content['parts'].append(
-                        types.Part.from_bytes(
-                                data=image['data'],
-                                mime_type=image['content_type'],
+                files = await self.resolve_context_files(msg, asset_store)
+                for file_info in files:
+                    content_type = file_info.get('content_type') or "application/octet-stream"
+                    if content_type.startswith("image/") and file_info.get('data') is not None:
+                        content['parts'].append(
+                            types.Part.from_bytes(
+                                data=file_info['data'],
+                                mime_type=content_type,
                             )
-                    )
+                        )
+                    else:
+                        filename = file_info.get('filename') or file_info.get('asset_id') or "file"
+                        content['parts'].append(
+                            types.Part.from_text(text=f"[Attached file: {filename} ({content_type})]")
+                        )
             full_prompt.append(content)
 
         # Add jailbreak prompt

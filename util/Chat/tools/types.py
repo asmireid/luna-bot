@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from util.Media.types import AssetRef
+
 ProviderType = Literal["local", "mcp"]
 ToolVisibility = Literal["model", "host", "hidden"]
 
@@ -42,6 +44,7 @@ class ToolResult:
     ok: bool
     content: Any
     structured_content: dict[str, Any] | None = None
+    files: list[AssetRef] = field(default_factory=list)
     error: str | None = None
     provider_id: str | None = None
     tool_name: str | None = None
@@ -58,6 +61,7 @@ class ToolExecutionContext:
     discord_ctx: Any | None = None
     author_name: str | None = None
     request_id: str | None = None
+    asset_store: Any | None = None
     raw_context: dict[str, Any] = field(default_factory=dict)
 
 

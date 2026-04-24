@@ -30,6 +30,7 @@ class OpenAILikeBackend(ChatBackend):
             messages.append({"role": "system", "content": f"Memory: {self.memory}"})
 
         ctx = context if context is not None else self.context
+        asset_store = kwargs.get("asset_store")
         for msg in ctx:
             role = msg['role']
             
@@ -65,17 +66,24 @@ class OpenAILikeBackend(ChatBackend):
             else:
                 openai_role = 'assistant' if role == 'model' else 'user'
                 text_content = f"[User: {msg['name']}]\n{msg['content']}" if openai_role == 'user' else msg['content']
-                images = msg.get('images', [])
+                files = await self.resolve_context_files(msg, asset_store)
 
-                if images:
+                if files:
                     content_parts = [{"type": "text", "text": text_content}]
-                    for img in images:
-                        b64_data = base64.b64encode(img['data']).decode('utf-8')
-                        content_type = img['content_type']
-                        content_parts.append({
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{content_type};base64,{b64_data}"}
-                        })
+                    for file_info in files:
+                        content_type = file_info.get('content_type') or "application/octet-stream"
+                        if content_type.startswith("image/") and file_info.get('data') is not None:
+                            b64_data = base64.b64encode(file_info['data']).decode('utf-8')
+                            content_parts.append({
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{content_type};base64,{b64_data}"}
+                            })
+                        else:
+                            filename = file_info.get('filename') or file_info.get('asset_id') or "file"
+                            content_parts.append({
+                                "type": "text",
+                                "text": f"[Attached file: {filename} ({content_type})]"
+                            })
                     messages.append({'role': openai_role, 'content': content_parts})
                 else:
                     messages.append({'role': openai_role, 'content': text_content})

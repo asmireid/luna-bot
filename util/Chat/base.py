@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Optional, Tuple, Any
 
 from util.Chat.tools import chat_tools
+from util.Media.types import AssetRef
 
 class ChatBackend(ABC):
     def __init__(self,
@@ -118,8 +119,10 @@ class ChatBackend(ABC):
 
         print(f"Chat: received message: {message}")
         author_name = kwargs.get('author_name', 'User')
-        images = kwargs.get('images', [])
-        await self.add_context('user', message, author_name, images=images)
+        files = kwargs.get('files')
+        if files is None:
+            files = kwargs.get('images', [])
+        await self.add_context('user', message, author_name, files=files)
         
         timeout = kwargs.get('timeout')
 
@@ -148,7 +151,7 @@ class ChatBackend(ABC):
                 result_text = result.as_text()
                 
                 # Record the tool's result
-                await self.add_context('tool_result', result_text, tool_name, raw=raw_part)
+                await self.add_context('tool_result', result_text, tool_name, files=result.files, raw=raw_part)
                 
                 yield {"type": "tool_end", "tool_name": tool_name, "result": result_text}
             else:
@@ -181,11 +184,11 @@ class ChatBackend(ABC):
 
         return reply
 
-    async def add_context(self, role: str, content: str, name: str, images:list = None, raw: Any = None):
-        if images is None:
-            images = []
+    async def add_context(self, role: str, content: str, name: str, files:list = None, raw: Any = None):
+        if files is None:
+            files = []
         print(f"Chat: adding context ({role}, {name}): {content[:50]}...")
-        self.context.append({'role': role, 'content': content, 'name': name, 'images': images, 'raw': raw})
+        self.context.append({'role': role, 'content': content, 'name': name, 'files': files, 'raw': raw})
         if len(self.context) > self.context_limit:
             print("Chat: context limit reached.")
             
@@ -194,6 +197,41 @@ class ChatBackend(ABC):
             self.reset_context(self.context_keep)
 
             asyncio.create_task(self.summarize(context_to_summarize))
+
+    async def resolve_context_files(self, msg: Dict[str, Any], asset_store: Any | None = None) -> List[Dict[str, Any]]:
+        resolved = []
+        files = msg.get('files')
+        if files is None:
+            files = msg.get('images', [])
+
+        for item in files:
+            if isinstance(item, AssetRef):
+                if asset_store is None:
+                    resolved.append({
+                        'asset_id': item.asset_id,
+                        'filename': item.filename,
+                        'content_type': item.mime_type,
+                        'kind': item.kind,
+                    })
+                    continue
+                data = await asset_store.resolve_bytes(item.asset_id)
+                resolved.append({
+                    'asset_id': item.asset_id,
+                    'filename': item.filename,
+                    'content_type': item.mime_type,
+                    'kind': item.kind,
+                    'data': data,
+                })
+                continue
+
+            normalized = dict(item)
+            asset_id = normalized.get('asset_id')
+            if asset_id and 'data' not in normalized and asset_store is not None:
+                normalized['data'] = await asset_store.resolve_bytes(asset_id)
+            normalized.setdefault('kind', 'image' if str(normalized.get('content_type', '')).startswith('image/') else 'file')
+            resolved.append(normalized)
+
+        return resolved
     
     def pop_context(self, index: int = 0):
         self.context.pop(index)

@@ -110,9 +110,14 @@ class ToolManager:
             )
 
         context_kwargs = context_kwargs or {}
+        discord_ctx = context_kwargs.get("ctx")
+        asset_store = context_kwargs.get("asset_store")
+        if asset_store is None and discord_ctx is not None:
+            asset_store = getattr(getattr(discord_ctx, "bot", None), "asset_store", None)
         execution_context = ToolExecutionContext(
-            discord_ctx=context_kwargs.get("ctx"),
+            discord_ctx=discord_ctx,
             author_name=context_kwargs.get("author_name"),
+            asset_store=asset_store,
             raw_context=context_kwargs,
         )
         return await provider.call_tool(spec.qualified_name, kwargs, execution_context)
