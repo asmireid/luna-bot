@@ -74,9 +74,18 @@ class GeminiBackend(ChatBackend):
                 part = types.Part.from_function_response(name=msg['name'], response={"result": msg['content']})
                 content = {'role': 'user', 'parts': [part]}
                 
+            elif role == 'model':
+                if msg.get('raw'):
+                    # raw could be a Part or a list of Parts
+                    parts = msg['raw'] if isinstance(msg['raw'], list) else [msg['raw']]
+                    content = {'role': 'model', 'parts': parts}
+                else:
+                    part = types.Part.from_text(text=msg['content'])
+                    content = {'role': 'model', 'parts': [part]}
+
             else:
-                gemini_role = 'model' if role == 'model' else 'user'
-                prefix = f"[User: {msg['name']}]\n" if gemini_role == 'user' else ""
+                gemini_role = 'user'
+                prefix = f"[User: {msg['name']}]\n"
                 part = types.Part.from_text(text=f"{prefix}{msg['content']}")
                 content = {'role': gemini_role, 'parts': [part]}
 
@@ -151,3 +160,9 @@ class GeminiBackend(ChatBackend):
 
     def _extract_text(self, reply_obj: Any) -> str:
         return reply_obj.text or ""
+
+    def _extract_raw(self, reply_obj: Any) -> Any:
+        # Return all parts of the first candidate to preserve thoughts, text, and media
+        if reply_obj.candidates and reply_obj.candidates[0].content:
+            return reply_obj.candidates[0].content.parts
+        return None

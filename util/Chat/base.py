@@ -110,6 +110,16 @@ class ChatBackend(ABC):
         """
         pass
 
+    @abstractmethod
+    def _extract_raw(self, reply_obj: Any) -> Any:
+        """
+        Extracts the raw message/part object from a raw API response object.
+        
+        :param reply_obj: The raw response object returned by `_generate_reply`.
+        :return: The raw message object.
+        """
+        pass
+
     async def chat_stream(self, message: str, **kwargs):
         """
         An async generator that yields status updates, tool executions, and finally the text response.
@@ -156,7 +166,8 @@ class ChatBackend(ABC):
                 yield {"type": "tool_end", "tool_name": tool_name, "result": result_text}
             else:
                 reply_text = self._extract_text(reply_obj)
-                await self.add_context('model', reply_text, self.bot_name)
+                raw_part = self._extract_raw(reply_obj)
+                await self.add_context('model', reply_text, self.bot_name, raw=raw_part)
                 yield {"type": "final", "content": reply_text}
                 break
 

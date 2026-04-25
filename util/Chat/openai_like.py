@@ -54,22 +54,26 @@ class OpenAILikeBackend(ChatBackend):
                     
             elif role == 'tool_result':
                 raw = msg.get('raw')
+                # Try to find the matching tool_call_id
+                # In most cases, there's only one tool call in the context preceding this result
+                tool_call_id = "call_fallback"
                 if isinstance(raw, dict) and raw.get('tool_calls'):
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": raw['tool_calls'][0]['id'],
-                        "content": msg['content']
-                    })
-                else:
-                    # If this history came from a different backend, degrade it to plain assistant text.
-                    messages.append({
-                        "role": "assistant",
-                        "content": f"[Tool Result: {msg['name']}]\n{msg['content']}"
-                    })
+                    tool_call_id = raw['tool_calls'][0]['id']
                 
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": msg['content']
+                })
+                
+            elif role == 'model':
+                if isinstance(msg.get('raw'), dict):
+                    messages.append(msg['raw'])
+                else:
+                    messages.append({"role": "assistant", "content": msg['content']})
             else:
-                openai_role = 'assistant' if role == 'model' else 'user'
-                text_content = f"[User: {msg['name']}]\n{msg['content']}" if openai_role == 'user' else msg['content']
+                openai_role = 'user'
+                text_content = f"[User: {msg['name']}]\n{msg['content']}"
                 files = await self.resolve_context_files(msg, asset_store)
 
                 if files:
@@ -120,17 +124,17 @@ class OpenAILikeBackend(ChatBackend):
             top_p=kwargs.get("top_p"),
             tools=openai_tools
         )
-        parsed = raw_response.parse()
+        
+        # Capture raw text BEFORE parsing to ensure we have it for reasoning_content extraction
+        raw_text = raw_response.text
         raw_json = {}
-        raw_text = getattr(raw_response, "text", None)
-        if callable(raw_text):
-            raw_text = raw_text()
-        if isinstance(raw_text, str):
-            try:
-                raw_json = json.loads(raw_text)
-            except json.JSONDecodeError:
-                raw_json = {}
+        try:
+            raw_json = json.loads(raw_text)
+        except Exception:
+            raw_json = {}
 
+        parsed = raw_response.parse()
+        
         return {
             "parsed": parsed,
             "raw_json": raw_json,
@@ -150,14 +154,35 @@ class OpenAILikeBackend(ChatBackend):
         except Exception:
             args = {}
             
-        raw_msg = (
-            reply_obj.get("raw_json", {})
-            .get("choices", [{}])[0]
-            .get("message")
-        ) or message.model_dump()
+        raw_msg = self._extract_raw(reply_obj)
         
         return name, args, raw_msg
 
     def _extract_text(self, reply_obj: Any) -> str:
         text = reply_obj["parsed"].choices[0].message.content
         return text or ""
+
+    def _extract_raw(self, reply_obj: Any) -> Any:
+        message = reply_obj["parsed"].choices[0].message
+        
+        # Try to get the message from raw_json to preserve non-standard fields like reasoning_content
+        raw_msg = (
+            reply_obj.get("raw_json", {})
+            .get("choices", [{}])[0]
+            .get("message")
+        )
+        
+        if not raw_msg:
+            # Fallback to model_dump and manually add reasoning_content if it exists as an attribute
+            raw_msg = message.model_dump()
+            if hasattr(message, "reasoning_content") and message.reasoning_content:
+                raw_msg["reasoning_content"] = message.reasoning_content
+            # Some providers might use 'thought'
+            if hasattr(message, "thought") and message.thought:
+                raw_msg["thought"] = message.thought
+        
+        # Ensure content is present (even if None) as required by some APIs
+        if "content" not in raw_msg:
+            raw_msg["content"] = message.content
+
+        return raw_msg

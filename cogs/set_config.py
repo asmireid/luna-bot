@@ -9,7 +9,6 @@ CHAT_RELOAD_KEYS = {
     "chat_backend",
     "model",
     "openai_like_base_url",
-    "local_api_url",
     "gemini_proxy_url",
     "system_prompt",
     "summarize_prompt",
