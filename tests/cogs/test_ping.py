@@ -26,7 +26,7 @@ async def test_server_time_command(mock_bot, mock_ctx):
     args, kwargs = mock_ctx.reply.call_args
     embed = kwargs.get('embed')
     assert isinstance(embed, discord.Embed)
-    assert "Server's current time is" in embed.description
+    assert "The server's current time is" in embed.description
 
 @pytest.mark.asyncio
 async def test_time_command(mock_bot, mock_ctx):

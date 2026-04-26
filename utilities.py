@@ -10,7 +10,7 @@ async def try_delete_invocation(msg):
 
 async def try_delete_confirmation(msg):
     if Config().delete_confirmation:
-        await asyncio.sleep(Config().wait_time)
+        await asyncio.sleep(Config().seconds_before_deleting_confirmation)
         await msg.delete()
 
 

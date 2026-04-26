@@ -6,6 +6,7 @@ import platform
 import argparse
 from discord.ext import commands
 from config.config import Config
+from util.Media import get_or_create_asset_store
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=Config().command_prefix.split(' '), intents=intents)
@@ -31,6 +32,7 @@ async def on_ready():
     print(f"{time_prefix} Bot ID {bot.user.id}")
     print(f"{time_prefix} Discord.py Version {discord.__version__}")
     print(f"{time_prefix} Python Version {platform.python_version()}")
+    get_or_create_asset_store(bot)
     await update()
 
 

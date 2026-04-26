@@ -1,0 +1,10 @@
+{
+  "providers": [
+    {
+      "id": "local",
+      "type": "local",
+      "enabled": true,
+      "settings": {}
+    }
+  ]
+}

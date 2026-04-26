@@ -6,6 +6,7 @@ from discord.ext import commands
 
 from utilities import *
 from util.Chat.backend_factory import create_backend
+from util.Media import get_or_create_asset_store
 
 class Chat(commands.Cog):
     def __init__(self, bot):
@@ -36,17 +37,24 @@ class Chat(commands.Cog):
         if message is None:
             message = ""
 
-        images = []
+        asset_store = get_or_create_asset_store(ctx.bot)
+        files = []
         if ctx.message.attachments:
             for attachment in ctx.message.attachments:
                 mime_type = attachment.content_type or mimetypes.guess_type(attachment.filename)[0]
-
-                if mime_type and mime_type.startswith('image/'):
-                    images.append({
-                        'name': attachment.filename,
-                        'data': await attachment.read(),
-                        'mime_type': mime_type,
-                    })
+                if not mime_type:
+                    mime_type = "application/octet-stream"
+                data = await attachment.read()
+                kind = 'image' if mime_type.startswith('image/') else 'file'
+                ref = await asset_store.put_bytes(
+                    data,
+                    mime_type,
+                    kind=kind,
+                    filename=attachment.filename,
+                    source='discord',
+                    metadata={'attachment_url': getattr(attachment, 'url', None)},
+                )
+                files.append(ref)
         configs = Config()
         params = {
             'temperature': configs.temperature, 
@@ -54,7 +62,8 @@ class Chat(commands.Cog):
             'top_k': configs.top_k,
             'max_new_tokens': configs.max_new_tokens,
             'author_name': ctx.author.nick or ctx.author.name,
-            'images': images,
+            'files': files,
+            'asset_store': asset_store,
             'timeout': configs.timeout
         }
         # print(params)
@@ -66,18 +75,57 @@ class Chat(commands.Cog):
     async def process_chat_queue(self):
         while not self.chat_queue.empty():
             message, params, ctx = await self.chat_queue.get()
+            params['ctx'] = ctx  # Inject ctx for tools that might need it
+            
+            status_msg = None
+            tool_logs = ""
 
             try:
                 async with ctx.typing():
-                    response = await self.backend.chat(message, **params)
-                    await try_reply(ctx, response)
+                    async for update in self.backend.chat_stream(message, **params):
+                        
+                        if update["type"] == "status" and not status_msg:
+                            # Send initial thinking message
+                            status_msg = await try_reply(ctx, f"🤔 Thinking...")
+                            
+                        elif update["type"] == "tool_start":
+                            tool_logs += f"\n🛠️ Using `{update['tool_name']}`..."
+                            if status_msg:
+                                await status_msg.edit(content=f"🤔 Thinking...{tool_logs}")
+                                
+                        elif update["type"] == "tool_end":
+                            tool_logs += " ✅"
+                            if status_msg:
+                                await status_msg.edit(content=f"🤔 Thinking...{tool_logs}")
+                                
+                        elif update["type"] == "final":
+                            final_text = update["content"]
+                            # If we have tool logs, keep them above the final message. 
+                            # Otherwise, just edit to the final text.
+                            if tool_logs:
+                                final_content = f"{tool_logs}\n\n{final_text}"
+                            else:
+                                final_content = final_text
+                                
+                            if status_msg:
+                                await status_msg.edit(content=final_content)
+                            else:
+                                await try_reply(ctx, final_content)
 
             except asyncio.TimeoutError:
                 timeout_s = params.get('timeout')
-                await try_reply(ctx, f"Error: timed out after {timeout_s}s (retried once).")
+                error_msg = f"Error: timed out after {timeout_s}s (retried once)."
+                if status_msg:
+                    await status_msg.edit(content=error_msg)
+                else:
+                    await try_reply(ctx, error_msg)
             except Exception as e:
                 logging.error(f"Chat Error: {repr(e)}", exc_info=True)
-                await try_reply(ctx, f"Error: {str(e)}")
+                error_msg = f"Error: {str(e)}"
+                if status_msg:
+                    await status_msg.edit(content=error_msg)
+                else:
+                    await try_reply(ctx, error_msg)
 
     @commands.command(aliases=['清空', "忘记一切"], help="clears chat history")
     async def reset_chat(self, ctx):
@@ -91,15 +139,47 @@ class Chat(commands.Cog):
             await try_reply(ctx, f"No context yet.")
             return
 
-        msg_embed = make_embed(ctx, title=f"{Config().bot_name}'s Chat", descr=f"Displaying stored context.")
+        msg_embed = make_embed(ctx, title=f"{Config().bot_name}'s Chat History", descr=f"Displaying stored context.")
 
         if self.backend.memory:
-            msg_embed.add_field(name="Memory", value=trim_embed_value(self.backend.memory), inline=False)
+            msg_embed.add_field(name="🧠 Memory", value=trim_embed_value(self.backend.memory), inline=False)
 
         for m in self.backend.context:
-            name = m.get("name") or m.get("role", "unknown")
-            content = m.get("content", "")
-            msg_embed.add_field(name=name, value=trim_embed_value(content), inline=False)
+            role = m.get('role')
+            name = m.get('name') or role
+            content = m.get('content', '')
+            files = m.get('files')
+            if files is None:
+                files = m.get('images', [])
+            
+            field_name = name
+            field_value = content
+            
+            if role == 'tool_call':
+                field_name = f"🛠️ Tool Call: {name}"
+                field_value = f"Arguments: {content}"
+            elif role == 'tool_result':
+                field_name = f"✅ Tool Result: {name}"
+                field_value = f"Output: {content}"
+            elif role == 'model':
+                field_name = f"🤖 {name}"
+            elif role == 'user':
+                field_name = f"👤 {name}"
+            
+            if files:
+                file_names = []
+                for file_info in files:
+                    if hasattr(file_info, 'filename'):
+                        file_names.append(file_info.filename or getattr(file_info, 'asset_id', 'file'))
+                    else:
+                        file_names.append(file_info.get('filename', file_info.get('asset_id', 'file')))
+                field_value = f"📎 [{len(files)} File(s): {', '.join(file_names)}]\n{field_value}"
+            
+            if len(msg_embed.fields) >= 25:
+                msg_embed.set_footer(text=f"{Config().embed_footer} | (Context truncated to last 25 items)")
+                break
+                
+            msg_embed.add_field(name=field_name, value=trim_embed_value(field_value) if field_value else "(No content)", inline=False)
 
         await try_reply(ctx, msg_embed)
 
