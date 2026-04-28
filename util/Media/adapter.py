@@ -265,6 +265,13 @@ async def _resolve_value(value: Any, asset_store: Any, provider_type: str) -> An
     if isinstance(value, list):
         return [await _resolve_value(item, asset_store, provider_type) for item in value]
 
+    if isinstance(value, str):
+        # Auto-detect asset IDs passed as strings (e.g. "img_1234abcd")
+        if value.startswith(("img_", "fil_")):
+            stored = await asset_store.get(value)
+            if stored:
+                return await _materialize_asset_ref(stored.ref, asset_store, provider_type)
+
     if isinstance(value, dict):
         if _is_asset_descriptor(value):
             stored = await asset_store.get(value["asset_id"])
@@ -285,38 +292,10 @@ async def _resolve_value(value: Any, asset_store: Any, provider_type: str) -> An
     return value
 
 
-async def _materialize_asset_ref(ref: AssetRef, asset_store: Any, provider_type: str) -> dict[str, Any]:
+async def _materialize_asset_ref(ref: AssetRef, asset_store: Any, provider_type: str) -> str:
     data = await asset_store.resolve_bytes(ref.asset_id)
-
-    if provider_type == "mcp":
-        if ref.kind == "image" or ref.mime_type.startswith("image/"):
-            payload = {
-                "type": "image",
-                "data": base64.b64encode(data).decode("utf-8"),
-                "mimeType": ref.mime_type,
-            }
-            if ref.filename:
-                payload["filename"] = ref.filename
-            return payload
-
-        resource = {
-            "uri": f"asset://{ref.asset_id}",
-            "mimeType": ref.mime_type,
-            "blob": base64.b64encode(data).decode("utf-8"),
-        }
-        if ref.filename:
-            resource["filename"] = ref.filename
-        return {"type": "resource", "resource": resource}
-
-    return {
-        "asset_id": ref.asset_id,
-        "kind": ref.kind,
-        "mime_type": ref.mime_type,
-        "filename": ref.filename,
-        "data": data,
-        "source": ref.source,
-        "metadata": dict(ref.metadata),
-    }
+    b64_data = base64.b64encode(data).decode("utf-8")
+    return f"data:{ref.mime_type};base64,{b64_data}"
 
 
 def _is_asset_descriptor(value: dict[str, Any]) -> bool:
