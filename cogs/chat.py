@@ -2,6 +2,8 @@ import os
 import logging
 import asyncio
 import mimetypes
+import io
+import discord
 from discord.ext import commands
 
 from utilities import *
@@ -76,6 +78,7 @@ class Chat(commands.Cog):
         while not self.chat_queue.empty():
             message, params, ctx = await self.chat_queue.get()
             params['ctx'] = ctx  # Inject ctx for tools that might need it
+            asset_store = params.get('asset_store')
             
             status_msg = None
             tool_logs = ""
@@ -97,6 +100,17 @@ class Chat(commands.Cog):
                             tool_logs += " ✅"
                             if status_msg:
                                 await status_msg.edit(content=f"🤔 Thinking...{tool_logs}")
+                            
+                            # Handle tool-generated files (e.g., from paint tool)
+                            new_files = update.get("files", [])
+                            if new_files and asset_store:
+                                discord_files = []
+                                for ref in new_files:
+                                    data = await asset_store.resolve_bytes(ref.asset_id)
+                                    discord_files.append(discord.File(io.BytesIO(data), filename=ref.filename or f"{ref.asset_id}.png"))
+                                
+                                if discord_files:
+                                    await try_reply(ctx, f"🛠️ `{update['tool_name']}` output:", files=discord_files)
                                 
                         elif update["type"] == "final":
                             final_text = update["content"]

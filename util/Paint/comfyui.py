@@ -22,21 +22,25 @@ class ComfyUIBackend(PaintBackend):
         self.server_address = server_address
         self.client_id = str(uuid.uuid4())
         self.comfyui_workflow_folder = comfyui_workflow_folder
-
-        # Resolve workflow file path
-        # 1. Try relative to the project root (CWD)
-        # 2. Try relative to this file's directory (internal/default)
-        root_path = os.path.join(os.getcwd(), comfyui_workflow_folder, workflow_file)
-        local_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), comfyui_workflow_folder, workflow_file)
-
-        if os.path.exists(root_path):
-            self.workflow_file = root_path
-        elif os.path.exists(local_path):
-            self.workflow_file = local_path
-        else:
-            self.workflow_file = workflow_file
-
+        self.workflow_file = self._resolve_workflow_path(workflow_file)
         self.workflow_vars, self.output_nodes, self.file_nodes = self._get_workflow_details(self.workflow_file)
+
+    def _resolve_workflow_path(self, workflow_name: str) -> str:
+        if not workflow_name:
+            return self.workflow_file
+        if not workflow_name.endswith('.json'):
+            workflow_name += '.json'
+            
+        # Try several locations
+        paths = [
+            os.path.join(os.getcwd(), self.comfyui_workflow_folder, workflow_name),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), self.comfyui_workflow_folder, workflow_name),
+            workflow_name
+        ]
+        for p in paths:
+            if os.path.exists(p):
+                return p
+        return workflow_name
 
     def _queue_prompt(self, prompt):
         p = {"prompt": prompt, "client_id": self.client_id}
@@ -54,7 +58,7 @@ class ComfyUIBackend(PaintBackend):
         with urllib.request.urlopen("http://{}/history/{}".format(self.server_address, prompt_id)) as response:
             return json.loads(response.read())
 
-    def _get_outputs(self, ws, prompt):
+    def _get_outputs(self, ws, prompt, output_nodes=None):
         prompt_id = self._queue_prompt(prompt)['prompt_id']
         print(f"ComfyUI: Prompt ID {prompt_id}")
 
@@ -75,20 +79,20 @@ class ComfyUIBackend(PaintBackend):
         if not history_outputs:
             return outputs
 
-        if self.output_nodes:
-            node_ids = [node_id for node_id in self.output_nodes if node_id in history_outputs]
+        if output_nodes:
+            node_ids = [node_id for node_id in output_nodes if node_id in history_outputs]
         else:
             node_ids = list(history_outputs.keys())
 
         for node_id in node_ids:
             node_output = history_outputs.get(node_id, {})
-            expected_type = self.output_nodes.get(node_id, 'any')
+            expected_type = output_nodes.get(node_id, 'any') if output_nodes else 'any'
             node_files = self._extract_files_from_node_output(node_output, expected_type)
             if node_files:
                 outputs[node_id] = node_files
 
         # If tagged nodes were configured but produced no matches, fallback to scanning every output node.
-        if not outputs and self.output_nodes:
+        if not outputs and output_nodes:
             for node_id, node_output in history_outputs.items():
                 node_files = self._extract_files_from_node_output(node_output, 'any')
                 if node_files:
@@ -118,10 +122,24 @@ class ComfyUIBackend(PaintBackend):
                 files.append({
                     'data': file_data,
                     'ext': final_ext,
-                    'type': self._media_type_from_ext(final_ext)
+                    'mime_type': self._get_mime_type(final_ext),
+                    'kind': self._media_type_from_ext(final_ext),
+                    'filename': filename
                 })
 
         return files
+
+    def _get_mime_type(self, ext: str) -> str:
+        ext = ext.lower().lstrip('.')
+        if ext in {'png', 'webp', 'bmp', 'tiff'}:
+            return f'image/{ext}'
+        if ext in {'jpg', 'jpeg'}:
+            return 'image/jpeg'
+        if ext in {'mp4', 'webm', 'mov'}:
+            return f'video/{ext}'
+        if ext == 'gif':
+            return 'image/gif'
+        return 'application/octet-stream'
 
     def _matches_expected_type(self, expected_type: str, ext: str) -> bool:
         expected = (expected_type or 'any').strip().lower()
@@ -153,8 +171,12 @@ class ComfyUIBackend(PaintBackend):
             print(f"Workflow file not found: {workflow_path}")
             return {}, {}, {}
 
-        with open(workflow_path, "r", encoding="utf-8") as f:
-            workflow_data = json.load(f)
+        try:
+            with open(workflow_path, "r", encoding="utf-8") as f:
+                workflow_data = json.load(f)
+        except Exception as e:
+            print(f"Error loading workflow JSON {workflow_path}: {e}")
+            return {}, {}, {}
 
         variables = {}
         output_nodes = {}
@@ -186,9 +208,15 @@ class ComfyUIBackend(PaintBackend):
                     file_nodes[order] = (id, keys, expected_type)
         return variables, output_nodes, file_nodes
 
-    def get_variables(self) -> Dict[str, Any]:
+    def get_variables(self, workflow: str = None) -> Dict[str, Any]:
+        if workflow:
+            path = self._resolve_workflow_path(workflow)
+            vars, _, _ = self._get_workflow_details(path)
+        else:
+            vars = self.workflow_vars
+
         variables = {}
-        for name, (_, _, vals) in self.workflow_vars.items():
+        for name, (_, _, vals) in vars.items():
             variables[name] = vals[0] if len(vals) == 1 else vals
         return variables
 
@@ -206,20 +234,19 @@ class ComfyUIBackend(PaintBackend):
             return sorted([f for f in os.listdir(directory) if f.endswith('.json')])
         return []
 
-    def _generate_workflow_payload(self, workflow_path, **kwargs):
+    def _generate_workflow_payload(self, workflow_path, workflow_vars, **kwargs):
         with open(workflow_path, "r", encoding="utf-8") as f:
             prompt_workflow = json.load(f)
 
-        vars = self.workflow_vars
-
         for key, args in kwargs.items():
-            if key in vars:
-                id, keys, _ = vars[key]
+            if key in workflow_vars:
+                id, keys, _ = workflow_vars[key]
                 # Ensure args is a list/tuple for enumeration
                 values_to_assign = args if isinstance(args, (list, tuple)) else [args]
                 for i, arg in enumerate(values_to_assign):
                     if i < len(keys):
-                        prompt_workflow[id]['inputs'][keys[i]] = arg
+                        if id in prompt_workflow and 'inputs' in prompt_workflow[id]:
+                            prompt_workflow[id]['inputs'][keys[i]] = arg
 
         return prompt_workflow
 
@@ -253,11 +280,11 @@ class ComfyUIBackend(PaintBackend):
             print(f"ComfyUI File Upload Exception: {e}")
             return upload_name
 
-    def _process_input_files(self, prompt_workflow: Dict, input_files: List[Dict]) -> None:
-        if not input_files or not hasattr(self, 'file_nodes') or not self.file_nodes:
+    def _process_input_files(self, prompt_workflow: Dict, file_nodes: Dict, input_files: List[Dict]) -> None:
+        if not input_files or not file_nodes:
             return
             
-        for order, (node_id, keys, expected_type) in self.file_nodes.items():
+        for order, (node_id, keys, expected_type) in file_nodes.items():
             if order < len(input_files):
                 file_info = input_files[order]
                 ext = os.path.splitext(file_info['filename'])[1].lower()
@@ -279,22 +306,30 @@ class ComfyUIBackend(PaintBackend):
 
     def _generate_sync(self, prompt: str, negative_prompt: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
         gen_kwargs = kwargs.copy()
+        
+        workflow_name = gen_kwargs.pop('workflow', None)
+        workflow_path = self._resolve_workflow_path(workflow_name)
+        
+        if workflow_path != self.workflow_file:
+             vars, output_nodes, file_nodes = self._get_workflow_details(workflow_path)
+        else:
+             vars, output_nodes, file_nodes = self.workflow_vars, self.output_nodes, self.file_nodes
 
         # Map standard prompts to workflow variables if they exist
-        if 'PositivePrompt' in self.workflow_vars:
+        if 'PositivePrompt' in vars:
             gen_kwargs['PositivePrompt'] = [prompt]
-        if negative_prompt and 'NegativePrompt' in self.workflow_vars:
+        if negative_prompt and 'NegativePrompt' in vars:
             gen_kwargs['NegativePrompt'] = [negative_prompt]
 
-        prompt_workflow = self._generate_workflow_payload(self.workflow_file, **gen_kwargs)
+        prompt_workflow = self._generate_workflow_payload(workflow_path, vars, **gen_kwargs)
 
         input_files = gen_kwargs.get('input_files', [])
-        self._process_input_files(prompt_workflow, input_files)
+        self._process_input_files(prompt_workflow, file_nodes, input_files)
 
         ws = websocket.WebSocket()
         try:
             ws.connect("ws://{}/ws?clientId={}".format(self.server_address, self.client_id))
-            outputs_map = self._get_outputs(ws, prompt_workflow)
+            outputs_map = self._get_outputs(ws, prompt_workflow, output_nodes=output_nodes)
         finally:
             ws.close()
 
@@ -303,9 +338,11 @@ class ComfyUIBackend(PaintBackend):
             for file in files:
                 if file.get('data'):
                     results.append({
-                        'type': file.get('type', 'file'),
+                        'kind': file.get('kind', 'file'),
                         'data': file.get('data'),
-                        'ext': file.get('ext', 'bin')
+                        'mime_type': file.get('mime_type'),
+                        'ext': file.get('ext', 'bin'),
+                        'filename': file.get('filename')
                     })
 
         return results

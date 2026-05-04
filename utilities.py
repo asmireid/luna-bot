@@ -5,7 +5,10 @@ from config.config import Config
 
 async def try_delete_invocation(msg):
     if Config().delete_invocation:
-        await msg.delete()
+        try:
+            await msg.delete()
+        except Exception:
+            pass
 
 
 async def try_delete_confirmation(msg):
