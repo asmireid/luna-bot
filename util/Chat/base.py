@@ -7,6 +7,7 @@ from typing import List, Dict, Optional, Tuple, Any
 
 from util.Chat.tools import chat_tools
 from util.Media.types import AssetRef
+from util.Chat.storage import ChatStorage
 
 class ChatBackend(ABC):
     def __init__(self,
@@ -15,13 +16,17 @@ class ChatBackend(ABC):
                 system_prompt: str = None,
                 summarize_prompt: str = None,
                 jailbreak_prompt: str = None,
-                bot_name: str = "Luna"):
+                bot_name: str = "Luna",
+                db_path: str = "chat_history.db"):
         self.context_limit = context_limit
         self.context_keep = context_keep
         self.system_prompt, self.summarize_prompt, self.jailbreak_prompt = self._load_prompts(system_prompt, summarize_prompt, jailbreak_prompt)
-        self.memory = ""
-        self.context: List[Dict[str, Any]] = []
         self.bot_name = bot_name
+        self.storage = ChatStorage(db_path)
+        
+        # Sync initial state from DB
+        self.memory = self.storage.get_memory()
+        self.context = self.storage.load_context(self.context_limit)
 
     def _load_prompt(self, prompt: str, kind: str) -> str:
         if prompt and os.path.isfile(prompt):
@@ -191,6 +196,7 @@ class ChatBackend(ABC):
         reply = await self._generate_reply(context=temp_context, use_system_prompt=False, **kwargs)
         
         self.memory = reply
+        self.storage.set_memory(reply)
         print(f"Chat: summary updated: {self.memory}")
 
         return reply
@@ -199,7 +205,13 @@ class ChatBackend(ABC):
         if files is None:
             files = []
         print(f"Chat: adding context ({role}, {name}): {content[:50]}...")
+        
+        # Save to DB
+        self.storage.save_message(role, content, name, files=files, raw=raw)
+        
+        # Update in-memory cache
         self.context.append({'role': role, 'content': content, 'name': name, 'files': files, 'raw': raw})
+        
         if len(self.context) > self.context_limit:
             print("Chat: context limit reached.")
             
@@ -248,6 +260,7 @@ class ChatBackend(ABC):
         self.context.pop(index)
 
     def reset_context(self, keep=None):
+        self.storage.clear_context(keep=keep)
         if not keep:
             self.context = []
         else:
@@ -255,3 +268,4 @@ class ChatBackend(ABC):
     
     def reset_memory(self):
         self.memory = ''
+        self.storage.set_memory('')

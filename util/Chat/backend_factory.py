@@ -8,6 +8,7 @@ OPENAI_LIKE_NAMES = {"openai", "openai-like", "deepseek"}
 def create_backend(configs: Config, backend_name: str, model: Optional[str] = None):
     name = (backend_name or "").lower().strip()
     model = (model or configs.model).strip()
+    db_path = "data/chat_history.db"
 
     if name == "gemini":
         return GeminiBackend(
@@ -20,6 +21,7 @@ def create_backend(configs: Config, backend_name: str, model: Optional[str] = No
             context_limit=configs.context_limit,
             context_keep=configs.context_keep,
             bot_name=configs.bot_name,
+            db_path=db_path
         )
 
     # default: openai-like
@@ -33,4 +35,5 @@ def create_backend(configs: Config, backend_name: str, model: Optional[str] = No
         context_limit=configs.context_limit,
         context_keep=configs.context_keep,
         bot_name=configs.bot_name,
+        db_path=db_path
     )

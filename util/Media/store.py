@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import mimetypes
 import os
-import tempfile
+import json
 import time
 import uuid
 from pathlib import Path
@@ -14,18 +14,72 @@ from .types import AssetKind, AssetRef, StoredAsset
 class AssetStore:
     def __init__(
         self,
-        base_dir: str | None = None,
-        memory_limit_bytes: int = 8 * 1024 * 1024,
-        default_ttl_seconds: int = 60 * 60,
+        base_dir: str | None = "data/assets",
+        default_ttl_seconds: int = 60 * 60 * 24 * 7, # Default to 1 week
     ) -> None:
-        runtime_dir = Path(base_dir or Path(tempfile.gettempdir()) / "luna-bot-assets")
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-
-        self.base_dir = runtime_dir
-        self.memory_limit_bytes = memory_limit_bytes
+        self.base_dir = Path(base_dir)
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.index_path = self.base_dir / "index.json"
         self.default_ttl_seconds = default_ttl_seconds
         self._assets: dict[str, StoredAsset] = {}
         self._lock = asyncio.Lock()
+        self._load_index()
+
+    def _load_index(self):
+        if not self.index_path.exists():
+            return
+        try:
+            with open(self.index_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                for asset_id, item in data.items():
+                    ref = AssetRef(
+                        asset_id=item['ref']['asset_id'],
+                        kind=item['ref']['kind'],
+                        mime_type=item['ref']['mime_type'],
+                        filename=item['ref']['filename'],
+                        source=item['ref']['source'],
+                        metadata=item['ref']['metadata'],
+                    )
+                    stored = StoredAsset(
+                        ref=ref,
+                        created_at=item['created_at'],
+                        last_accessed_at=item['last_accessed_at'],
+                        size_bytes=item['size_bytes'],
+                        metadata=item['metadata'],
+                        path=item.get('path'),
+                        pin_count=item.get('pin_count', 0)
+                    )
+                    # Verify file still exists on disk
+                    if stored.path and os.path.exists(stored.path):
+                        self._assets[asset_id] = stored
+        except Exception as e:
+            print(f"AssetStore: Failed to load index: {e}")
+
+    def _save_index(self):
+        data = {}
+        for asset_id, asset in self._assets.items():
+            data[asset_id] = {
+                'ref': {
+                    'asset_id': asset.ref.asset_id,
+                    'kind': asset.ref.kind,
+                    'mime_type': asset.ref.mime_type,
+                    'filename': asset.ref.filename,
+                    'source': asset.ref.source,
+                    'metadata': asset.ref.metadata,
+                },
+                'created_at': asset.created_at,
+                'last_accessed_at': asset.last_accessed_at,
+                'size_bytes': asset.size_bytes,
+                'metadata': asset.metadata,
+                'path': asset.path,
+                'pin_count': asset.pin_count
+            }
+        try:
+            with open(self.index_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"AssetStore: Failed to save index: {e}")
 
     async def put_bytes(
         self,
@@ -42,6 +96,9 @@ class AssetStore:
         now = time.time()
         metadata = dict(metadata or {})
 
+        # Always write to disk for persistence
+        path = await asyncio.to_thread(self._write_asset_file, asset_id, filename, mime_type, data)
+
         ref = AssetRef(
             asset_id=asset_id,
             kind=kind,
@@ -56,15 +113,12 @@ class AssetStore:
             last_accessed_at=now,
             size_bytes=len(data),
             metadata=metadata.copy(),
+            path=path
         )
-
-        if len(data) <= self.memory_limit_bytes:
-            stored.data = data
-        else:
-            stored.path = await asyncio.to_thread(self._write_asset_file, asset_id, filename, mime_type, data)
 
         async with self._lock:
             self._assets[asset_id] = stored
+            self._save_index()
 
         return ref
 
@@ -116,6 +170,7 @@ class AssetStore:
                 raise KeyError(f"Asset '{asset_id}' not found.")
             asset.pin_count += 1
             asset.last_accessed_at = time.time()
+            self._save_index()
 
     async def unpin(self, asset_id: str) -> None:
         async with self._lock:
@@ -125,6 +180,7 @@ class AssetStore:
             if asset.pin_count > 0:
                 asset.pin_count -= 1
             asset.last_accessed_at = time.time()
+            self._save_index()
 
     async def delete(self, asset_id: str, *, force: bool = False) -> bool:
         async with self._lock:
@@ -134,6 +190,7 @@ class AssetStore:
             if asset.is_pinned() and not force:
                 return False
             self._assets.pop(asset_id, None)
+            self._save_index()
 
         if asset.path:
             await asyncio.to_thread(self._remove_file, asset.path)
@@ -163,6 +220,9 @@ class AssetStore:
 
             for asset_id, _ in candidates:
                 self._assets.pop(asset_id, None)
+            
+            if candidates:
+                self._save_index()
 
         for _, path in candidates:
             if path:

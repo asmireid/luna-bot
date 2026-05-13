@@ -39,7 +39,7 @@ class Chat(commands.Cog):
         if message is None:
             message = ""
 
-        asset_store = get_or_create_asset_store(ctx.bot)
+        asset_store = get_or_create_asset_store(ctx.bot, base_dir="data/assets")
         files = []
         if ctx.message.attachments:
             for attachment in ctx.message.attachments:

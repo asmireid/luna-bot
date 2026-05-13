@@ -16,8 +16,9 @@ class GeminiBackend(ChatBackend):
                 system_prompt: str = None,
                 summarize_prompt: str = None,
                 jailbreak_prompt: str = None,
-                bot_name: str = "Luna"):
-        super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, summarize_prompt=summarize_prompt, jailbreak_prompt=jailbreak_prompt, bot_name=bot_name)
+                bot_name: str = "Luna",
+                db_path: str = "chat_history.db"):
+        super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, summarize_prompt=summarize_prompt, jailbreak_prompt=jailbreak_prompt, bot_name=bot_name, db_path=db_path)
         
         http_options = None
         if proxy_url:

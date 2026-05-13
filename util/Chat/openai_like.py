@@ -14,8 +14,9 @@ class OpenAILikeBackend(ChatBackend):
                 system_prompt: str = None,
                 summarize_prompt: str = None,
                 jailbreak_prompt: str = None,
-                bot_name: str = "Luna"):
-        super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, summarize_prompt=summarize_prompt, jailbreak_prompt=jailbreak_prompt, bot_name=bot_name)
+                bot_name: str = "Luna",
+                db_path: str = "chat_history.db"):
+        super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, summarize_prompt=summarize_prompt, jailbreak_prompt=jailbreak_prompt, bot_name=bot_name, db_path=db_path)
         # Assuming this is standard async OpenAI usage for async context
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self.model = model

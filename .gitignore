@@ -1,5 +1,6 @@
 .idea
 .env
+/data
 /venv
 /NAI_cache
 */__pycache__
