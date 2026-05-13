@@ -7,6 +7,7 @@ import json
 import time
 import uuid
 from pathlib import Path
+from utilities import EnhancedJSONEncoder
 
 from .types import AssetKind, AssetRef, StoredAsset
 
@@ -77,7 +78,7 @@ class AssetStore:
             }
         try:
             with open(self.index_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2)
+                json.dump(data, f, indent=2, cls=EnhancedJSONEncoder)
         except Exception as e:
             print(f"AssetStore: Failed to save index: {e}")
 

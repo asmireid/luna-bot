@@ -2,6 +2,7 @@ import sqlite3
 import json
 import os
 from typing import List, Dict, Any, Optional
+from utilities import EnhancedJSONEncoder
 
 class ChatStorage:
     def __init__(self, db_path: str = "data/chat_history.db"):
@@ -33,15 +34,11 @@ class ChatStorage:
             """)
 
     def save_message(self, role: str, content: str, name: str, files: List = None, raw: Any = None):
-        files_json = json.dumps(files) if files else None
-        # Raw might be complex objects (like Gemini Parts), but we try to serializing it or store as None if it fails
-        # For simplicity in this minimal step, we might just store None or a placeholder if not serializable
+        files_json = json.dumps(files, cls=EnhancedJSONEncoder) if files else None
         raw_json = None
         try:
             if raw:
-                # Note: Real Gemini/OpenAI objects might need specialized serialization
-                # For now, we store if it's already a dict/list or can be dumped
-                raw_json = json.dumps(raw)
+                raw_json = json.dumps(raw, cls=EnhancedJSONEncoder)
         except:
             pass
 
