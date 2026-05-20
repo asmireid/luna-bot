@@ -1,5 +1,7 @@
 import json
 import logging
+import base64
+import mimetypes
 from typing import Optional
 
 from util.Chat.tools import chat_tools
@@ -55,7 +57,8 @@ def paint_list_variables(ctx, workflow: Optional[str] = None) -> str:
     description=(
         "Generates an image or video using a prompt and optional workflow variables. "
         "The tool returns the generated file(s) which will be automatically attached to your response. "
-        "You can specify a 'workflow' to change the style, and pass 'variables' to customize the generation process."
+        "You can specify a 'workflow' to change the style, and pass 'variables' to customize the generation process. "
+        "To modify an existing image (Image-to-Image), provide the asset ID in the 'image' parameter."
     ),
     parameters={
         "type": "object",
@@ -63,6 +66,7 @@ def paint_list_variables(ctx, workflow: Optional[str] = None) -> str:
             "prompt": {"type": "string", "description": "The positive prompt describing what you want to see."},
             "negative_prompt": {"type": "string", "description": "What you want to avoid in the generation."},
             "workflow": {"type": "string", "description": "The workflow file to use (e.g., 'Anime.json'). See paint_list_workflows for options."},
+            "image": {"type": "string", "description": "Optional asset ID of an image to use as input for Image-to-Image (e.g., 'img_8a2f123')."},
             "variables": {
                 "type": "object",
                 "description": "Custom variables for the workflow (e.g., {'Width': 1024, 'Height': 1024, 'Seed': 12345}). See paint_list_variables for available keys in a specific workflow.",
@@ -72,7 +76,7 @@ def paint_list_variables(ctx, workflow: Optional[str] = None) -> str:
         "required": ["prompt"]
     },
 )
-async def paint_tool(ctx, prompt: str, negative_prompt: Optional[str] = None, workflow: Optional[str] = None, variables: Optional[dict] = None) -> list:
+async def paint_tool(ctx, prompt: str, negative_prompt: Optional[str] = None, workflow: Optional[str] = None, variables: Optional[dict] = None, image: Optional[str] = None) -> list:
     paint_cog = ctx.bot.get_cog('Paint')
     if not paint_cog or not hasattr(paint_cog, 'backend'):
         raise RuntimeError("Paint system is not initialized.")
@@ -80,6 +84,25 @@ async def paint_tool(ctx, prompt: str, negative_prompt: Optional[str] = None, wo
     kwargs = (variables or {}).copy()
     if workflow:
         kwargs['workflow'] = workflow
+    
+    # Handle input image (resolved by the system to a Data URI)
+    if image:
+        if image.startswith("data:"):
+            try:
+                header, data = image.split(",", 1)
+                file_data = base64.b64decode(data)
+                mime_type = header.split(";")[0].split(":")[1]
+                ext = mimetypes.guess_extension(mime_type) or ".png"
+                
+                kwargs['input_files'] = [{
+                    'filename': f"input_image{ext}",
+                    'data': file_data,
+                    'content_type': mime_type
+                }]
+            except Exception as e:
+                logging.error(f"Failed to process input image: {e}")
+        else:
+            logging.warning(f"Image parameter was not resolved to a Data URI: {image[:50]}...")
     
     # Optional: add default timeout if not provided in variables
     if 'timeout' not in kwargs:
@@ -91,3 +114,4 @@ async def paint_tool(ctx, prompt: str, negative_prompt: Optional[str] = None, wo
         return "No images were generated. Check the prompt or workflow variables."
         
     return results
+

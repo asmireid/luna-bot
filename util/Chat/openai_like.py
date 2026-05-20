@@ -66,6 +66,24 @@ class OpenAILikeBackend(ChatBackend):
                     "tool_call_id": tool_call_id,
                     "content": msg['content']
                 })
+
+                # Resolve and append images as a follow-up user message (since 'tool' role has no vision support)
+                files = await self.resolve_context_files(msg, asset_store)
+                if files:
+                    image_parts = []
+                    for file_info in files:
+                        content_type = file_info.get('content_type') or "application/octet-type"
+                        if content_type.startswith("image/") and file_info.get('data') is not None:
+                            b64_data = base64.b64encode(file_info['data']).decode('utf-8')
+                            image_parts.append({
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{content_type};base64,{b64_data}"}
+                            })
+                    if image_parts:
+                        messages.append({
+                            "role": "user",
+                            "content": [{"type": "text", "text": "Visual output from the tool:"}] + image_parts
+                        })
                 
             elif role == 'model':
                 if isinstance(msg.get('raw'), dict):

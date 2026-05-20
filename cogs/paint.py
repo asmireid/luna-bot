@@ -19,7 +19,6 @@ class Paint(commands.Cog):
         self.worker_task = asyncio.create_task(self._paint_worker())
 
     def _load_backend(self):
-        self.configs = Config()
         # Default to ComfyUI if not specified
         backend_name = getattr(self.configs, 'paint_backend', 'comfyui')
         print(f"Paint initialized with {backend_name.capitalize()} Backend.")
@@ -28,7 +27,7 @@ class Paint(commands.Cog):
             self.backend = ComfyUIBackend(
                 server_address=getattr(self.configs, 'comfyui_url', "127.0.0.1:8188"),
                 comfyui_workflow_folder=getattr(self.configs, 'comfyui_workflow_folder', "comfyui_workflows"),
-                workflow_file=getattr(self.configs, 'workflow', "Image_Anime_ChenkinNoob.json")
+                workflow_file=getattr(self.configs, 'workflow', "SDXL_example.json")
             )
         else:
             # Fallback or placeholder for other backends like NovelAI

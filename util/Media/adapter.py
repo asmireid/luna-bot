@@ -122,19 +122,21 @@ async def normalize_tool_result(
         if result.get("type") in ("image", "resource", "text"):
              result = [result] # Fall through to list handling
 
-    # 3. List of MCP content items
+    # 3. List of items (MCP content or raw media)
     if isinstance(result, list):
         text_parts = []
         normalized_files = []
         for item in result:
+            # First try to store it if it's an explicit media representation (dict or bytes)
+            ref = await _store_explicit_media(item, asset_store=asset_store, source=source)
+            if ref:
+                normalized_files.append(ref)
+                text_parts.append(f"[Attached file: {ref.filename or ref.asset_id}]")
+                continue
+
             if isinstance(item, dict):
                 if item.get("type") == "text":
                     text_parts.append(item.get("text", ""))
-                elif item.get("type") in ("image", "resource"):
-                    ref = await _store_explicit_media(item, asset_store=asset_store, source=source)
-                    if ref:
-                        normalized_files.append(ref)
-                        text_parts.append(f"[Attached file: {ref.filename or ref.asset_id}]")
                 else:
                     text_parts.append(str(item))
             elif isinstance(item, str):

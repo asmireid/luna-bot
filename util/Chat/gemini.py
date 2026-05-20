@@ -75,6 +75,18 @@ class GeminiBackend(ChatBackend):
                 part = types.Part.from_function_response(name=msg['name'], response={"result": msg['content']})
                 content = {'role': 'user', 'parts': [part]}
                 
+                # Resolve and append images so the model can "see" the result
+                files = await self.resolve_context_files(msg, asset_store)
+                for file_info in files:
+                    content_type = file_info.get('content_type') or "application/octet-stream"
+                    if content_type.startswith("image/") and file_info.get('data') is not None:
+                        content['parts'].append(
+                            types.Part.from_bytes(
+                                data=file_info['data'],
+                                mime_type=content_type,
+                            )
+                        )
+                
             elif role == 'model':
                 if msg.get('raw'):
                     # raw could be a Part or a list of Parts
