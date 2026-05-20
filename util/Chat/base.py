@@ -17,11 +17,13 @@ class ChatBackend(ABC):
                 summarize_prompt: str = None,
                 jailbreak_prompt: str = None,
                 bot_name: str = "Luna",
-                db_path: str = "chat_history.db"):
+                db_path: str = "chat_history.db",
+                max_tool_calls: int = 8):
         self.context_limit = context_limit
         self.context_keep = context_keep
         self.system_prompt, self.summarize_prompt, self.jailbreak_prompt = self._load_prompts(system_prompt, summarize_prompt, jailbreak_prompt)
         self.bot_name = bot_name
+        self.max_tool_calls = max_tool_calls
         self.storage = ChatStorage(db_path)
         
         # Sync initial state from DB
@@ -140,6 +142,8 @@ class ChatBackend(ABC):
         await self.add_context('user', message, author_name, files=files)
         
         timeout = kwargs.get('timeout')
+        max_tool_calls = kwargs.get('max_tool_calls', self.max_tool_calls)
+        tool_call_count = 0
 
         while True:
             yield {"type": "status", "content": "Generating response..."}
@@ -154,6 +158,12 @@ class ChatBackend(ABC):
                 reply_obj = await self._generate_reply(tools=tools_schema, **kwargs)
 
             if self._is_tool_call(reply_obj):
+                tool_call_count += 1
+                if tool_call_count > max_tool_calls:
+                    print(f"Chat: max tool calls ({max_tool_calls}) exceeded; forcing text response.")
+                    yield {"type": "final", "content": "I used too many tools already — let me summarize what I have so far."}
+                    break
+
                 tool_name, tool_args, raw_part = self._extract_tool_info(reply_obj)
                 
                 yield {"type": "tool_start", "tool_name": tool_name, "args": tool_args}
@@ -171,6 +181,9 @@ class ChatBackend(ABC):
                 yield {"type": "tool_end", "tool_name": tool_name, "result": result_text, "files": result.files}
             else:
                 reply_text = self._extract_text(reply_obj)
+                if not reply_text or not reply_text.strip():
+                    print(f"Chat: WARNING — model returned empty text. reply_obj keys: {dir(reply_obj) if not isinstance(reply_obj, dict) else list(reply_obj.keys())}")
+                    reply_text = "(empty response)"
                 raw_part = self._extract_raw(reply_obj)
                 await self.add_context('model', reply_text, self.bot_name, raw=raw_part)
                 yield {"type": "final", "content": reply_text}
@@ -196,7 +209,7 @@ class ChatBackend(ABC):
         reply = await self._generate_reply(context=temp_context, use_system_prompt=False, **kwargs)
         
         self.memory = reply
-        self.storage.set_memory(reply)
+        await self.storage.set_memory(reply)
         print(f"Chat: summary updated: {self.memory}")
 
         return reply
@@ -206,8 +219,8 @@ class ChatBackend(ABC):
             files = []
         print(f"Chat: adding context ({role}, {name}): {content[:50]}...")
         
-        # Save to DB
-        self.storage.save_message(role, content, name, files=files, raw=raw)
+        # Save to DB (non-blocking)
+        await self.storage.save_message(role, content, name, files=files, raw=raw)
         
         # Update in-memory cache
         self.context.append({'role': role, 'content': content, 'name': name, 'files': files, 'raw': raw})
@@ -259,13 +272,13 @@ class ChatBackend(ABC):
     def pop_context(self, index: int = 0):
         self.context.pop(index)
 
-    def reset_context(self, keep=None):
-        self.storage.clear_context(keep=keep)
+    async def reset_context(self, keep=None):
+        await self.storage.clear_context(keep=keep)
         if not keep:
             self.context = []
         else:
             self.context = self.context[-keep:]
     
-    def reset_memory(self):
+    async def reset_memory(self):
         self.memory = ''
-        self.storage.set_memory('')
+        await self.storage.set_memory('')

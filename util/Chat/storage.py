@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 import json
 import os
@@ -12,6 +13,7 @@ class ChatStorage:
         if db_dir:
             os.makedirs(db_dir, exist_ok=True)
         self._init_db()
+        self._executor = None  # lazy thread pool for writes
 
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
@@ -33,7 +35,7 @@ class ChatStorage:
                 )
             """)
 
-    def save_message(self, role: str, content: str, name: str, files: List = None, raw: Any = None):
+    async def save_message(self, role: str, content: str, name: str, files: List = None, raw: Any = None):
         files_json = json.dumps(files, cls=EnhancedJSONEncoder) if files else None
         raw_json = None
         try:
@@ -42,6 +44,11 @@ class ChatStorage:
         except:
             pass
 
+        return await asyncio.to_thread(
+            self._save_message_sync, role, content, name, files_json, raw_json
+        )
+
+    def _save_message_sync(self, role: str, content: str, name: str, files_json: str | None, raw_json: str | None):
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 "INSERT INTO messages (role, content, name, files_json, raw_json) VALUES (?, ?, ?, ?, ?)",
@@ -69,7 +76,10 @@ class ChatStorage:
                 context.append(msg)
             return context
 
-    def clear_context(self, keep: Optional[int] = None):
+    async def clear_context(self, keep: Optional[int] = None):
+        return await asyncio.to_thread(self._clear_context_sync, keep)
+
+    def _clear_context_sync(self, keep: Optional[int] = None):
         with sqlite3.connect(self.db_path) as conn:
             if keep:
                 conn.execute(
@@ -79,7 +89,10 @@ class ChatStorage:
             else:
                 conn.execute("DELETE FROM messages")
 
-    def set_memory(self, memory: str):
+    async def set_memory(self, memory: str):
+        return await asyncio.to_thread(self._set_memory_sync, memory)
+
+    def _set_memory_sync(self, memory: str):
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO metadata (key, value) VALUES ('memory', ?)",

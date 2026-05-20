@@ -4,11 +4,11 @@ from util.Media import AssetStore
 
 
 @pytest.mark.asyncio
-async def test_put_bytes_keeps_small_asset_in_memory(tmp_path):
-    store = AssetStore(base_dir=str(tmp_path), memory_limit_bytes=32)
+async def test_put_bytes_persists_asset_to_disk(tmp_path):
+    store = AssetStore(base_dir=str(tmp_path))
 
     ref = await store.put_bytes(
-        b"small-image",
+        b"persisted-data",
         "image/png",
         filename="sample.png",
         source="discord",
@@ -16,15 +16,15 @@ async def test_put_bytes_keeps_small_asset_in_memory(tmp_path):
 
     asset = await store.get(ref.asset_id)
     assert asset is not None
-    assert asset.data == b"small-image"
-    assert asset.path is None
+    assert asset.path is not None                # always persisted to disk now
     assert asset.ref.filename == "sample.png"
     assert asset.ref.source == "discord"
+    assert await store.resolve_bytes(ref.asset_id) == b"persisted-data"
 
 
 @pytest.mark.asyncio
-async def test_put_bytes_spills_large_asset_to_disk(tmp_path):
-    store = AssetStore(base_dir=str(tmp_path), memory_limit_bytes=4)
+async def test_put_bytes_resolves_from_disk(tmp_path):
+    store = AssetStore(base_dir=str(tmp_path))
 
     ref = await store.put_bytes(
         b"abcdef",
@@ -34,14 +34,13 @@ async def test_put_bytes_spills_large_asset_to_disk(tmp_path):
 
     asset = await store.get(ref.asset_id)
     assert asset is not None
-    assert asset.data is None
     assert asset.path is not None
     assert await store.resolve_bytes(ref.asset_id) == b"abcdef"
 
 
 @pytest.mark.asyncio
-async def test_resolve_path_materializes_in_memory_asset(tmp_path):
-    store = AssetStore(base_dir=str(tmp_path), memory_limit_bytes=64)
+async def test_resolve_path_returns_disk_path(tmp_path):
+    store = AssetStore(base_dir=str(tmp_path))
 
     ref = await store.put_bytes(
         b"materialize-me",

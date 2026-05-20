@@ -133,8 +133,6 @@ class GeminiBackend(ChatBackend):
             }
             full_prompt.append(jb)
 
-        loop = asyncio.get_running_loop()
-        
         # Format tools for Google GenAI
         tool_schemas = kwargs.get("tools")
         genai_tools = [{"function_declarations": tool_schemas}] if tool_schemas else None
@@ -152,11 +150,8 @@ class GeminiBackend(ChatBackend):
         config = genai.types.GenerateContentConfig(**config_kwargs)
 
         print(full_prompt)
-        # Run synchronous SDK call in executor
-        response = await loop.run_in_executor(
-            None,
-            lambda: self.client.models.generate_content(model=self.model, contents=full_prompt, config=config)
-        )
+        # Use native async client to avoid blocking the event loop
+        response = await self.client.aio.models.generate_content(model=self.model, contents=full_prompt, config=config)
         
         return response
 

@@ -2,10 +2,22 @@ import configparser
 
 
 class Config:
+    _instances: dict[str, "Config"] = {}
+
+    def __new__(cls, config_file: str = 'config/config.ini'):
+        if config_file not in cls._instances:
+            instance = super().__new__(cls)
+            cls._instances[config_file] = instance
+            instance._initialized = False
+        return cls._instances[config_file]
+
     def __init__(self, config_file='config/config.ini'):
+        if getattr(self, '_initialized', False):
+            return
         self.config_file = config_file
         self.config = self.load_config()
         self._generate_properties()
+        self._initialized = True
 
     def load_config(self):
         config = configparser.ConfigParser()

@@ -9,7 +9,8 @@ async def test_gemini_generate_reply(mocker):
     
     mock_response = mocker.MagicMock()
     mock_response.text = "This is a mocked Gemini response"
-    mock_client.models.generate_content.return_value = mock_response
+    # Native async client uses client.aio.models.generate_content
+    mock_client.aio.models.generate_content = mocker.AsyncMock(return_value=mock_response)
     
     # Initialize backend
     backend = GeminiBackend(api_key="fake-key", context_limit=5)
@@ -19,15 +20,14 @@ async def test_gemini_generate_reply(mocker):
         {"role": "user", "name": "User", "content": "Hello Gemini!"}
     ]
     
-    # generate_content runs in an executor, but we mocked genai.Client
     reply = await backend._generate_reply(context=context, use_system_prompt=False)
     
     assert reply == mock_response
     
     # Verify the mock was called correctly
-    mock_client.models.generate_content.assert_called_once()
+    mock_client.aio.models.generate_content.assert_called_once()
     
-    args, kwargs = mock_client.models.generate_content.call_args
+    args, kwargs = mock_client.aio.models.generate_content.call_args
     assert kwargs['model'] == "gemini-3-flash-preview"
     assert len(kwargs['contents']) == 1  # 1 message in context
     

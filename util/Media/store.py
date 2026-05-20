@@ -25,6 +25,8 @@ class AssetStore:
         self.default_ttl_seconds = default_ttl_seconds
         self._assets: dict[str, StoredAsset] = {}
         self._lock = asyncio.Lock()
+        self._dirty = False
+        self._debounce_task: asyncio.Task | None = None
         self._load_index()
 
     def _load_index(self):
@@ -56,6 +58,28 @@ class AssetStore:
                         self._assets[asset_id] = stored
         except Exception as e:
             print(f"AssetStore: Failed to load index: {e}")
+
+    def _mark_dirty(self):
+        """Debounce index saves — batches rapid mutations into a single write."""
+        self._dirty = True
+        if self._debounce_task is None or self._debounce_task.done():
+            self._debounce_task = asyncio.create_task(self._debounce_save())
+
+    async def _debounce_save(self):
+        await asyncio.sleep(1.0)  # batch writes within 1 second
+        async with self._lock:
+            if self._dirty:
+                self._save_index()
+                self._dirty = False
+
+    async def flush(self):
+        """Force-immediate write of the index to disk."""
+        if self._debounce_task and not self._debounce_task.done():
+            self._debounce_task.cancel()
+        async with self._lock:
+            if self._dirty:
+                self._save_index()
+                self._dirty = False
 
     def _save_index(self):
         data = {}
@@ -119,8 +143,8 @@ class AssetStore:
 
         async with self._lock:
             self._assets[asset_id] = stored
-            self._save_index()
 
+        self._mark_dirty()
         return ref
 
     async def get(self, asset_id: str) -> StoredAsset | None:
@@ -171,7 +195,7 @@ class AssetStore:
                 raise KeyError(f"Asset '{asset_id}' not found.")
             asset.pin_count += 1
             asset.last_accessed_at = time.time()
-            self._save_index()
+        self._mark_dirty()
 
     async def unpin(self, asset_id: str) -> None:
         async with self._lock:
@@ -181,7 +205,7 @@ class AssetStore:
             if asset.pin_count > 0:
                 asset.pin_count -= 1
             asset.last_accessed_at = time.time()
-            self._save_index()
+        self._mark_dirty()
 
     async def delete(self, asset_id: str, *, force: bool = False) -> bool:
         async with self._lock:
@@ -191,8 +215,8 @@ class AssetStore:
             if asset.is_pinned() and not force:
                 return False
             self._assets.pop(asset_id, None)
-            self._save_index()
 
+        self._mark_dirty()
         if asset.path:
             await asyncio.to_thread(self._remove_file, asset.path)
         return True
@@ -221,9 +245,9 @@ class AssetStore:
 
             for asset_id, _ in candidates:
                 self._assets.pop(asset_id, None)
-            
-            if candidates:
-                self._save_index()
+
+        if candidates:
+            self._mark_dirty()
 
         for _, path in candidates:
             if path:
