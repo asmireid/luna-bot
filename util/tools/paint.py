@@ -92,7 +92,7 @@ def paint_get_details(ctx, workflow: Optional[str] = None) -> str:
             "variables": {
                 "type": "object",
                 "description": "Custom variables for the workflow (e.g., {'Width': 1024, 'Height': 1024, 'Seed': 12345}). See paint_get_details for available keys and notes for a specific workflow.",
-                "additionalProperties": True
+                # "additionalProperties": True
             }
         },
         "required": ["prompt"]

@@ -52,7 +52,32 @@ class GeminiBackend(ChatBackend):
                 "parts": [types.Part.from_text(text=f"Memory: {self.memory}")],
             })
 
-        for e in entries:
+        # Cap *all* image payload at ~20 MB so neither user attachments
+        # nor repeated paint calls blow past Gemini's request limit (or
+        # the proxy's limit).  We walk backwards (newest first) and
+        # embed bytes while budget remains; older images get text labels.
+        IMAGE_BUDGET_BYTES = 20 * 1024 * 1024  # 20 MiB
+        keep_img_keys: set[tuple[int, int]] = set()  # (entry_idx, img_idx)
+        spent = 0
+        for i in range(len(entries) - 1, -1, -1):
+            e = entries[i]
+            if e["role"] not in ("tool_result", "user") or not e.get("images"):
+                continue
+            for j, img in enumerate(e["images"]):
+                size = len(img.get("data", b""))
+                if size == 0:
+                    continue
+                if spent + size <= IMAGE_BUDGET_BYTES:
+                    keep_img_keys.add((i, j))
+                    spent += size
+                else:
+                    break  # budget exhausted for this entry
+            if spent >= IMAGE_BUDGET_BYTES:
+                break
+
+        total_img_bytes = 0  # for debug logging
+
+        for i, e in enumerate(entries):
             role = e["role"]
 
             if role == "tool_call":
@@ -63,8 +88,14 @@ class GeminiBackend(ChatBackend):
                 parts: list[Any] = [
                     types.Part.from_function_response(name=e["name"], response={"result": e["text"]})
                 ]
-                for img in e["images"]:
-                    parts.append(types.Part.from_bytes(data=img["data"], mime_type=img["mime_type"]))
+                for j, img in enumerate(e["images"]):
+                    size = len(img.get("data", b""))
+                    if (i, j) in keep_img_keys:
+                        parts.append(types.Part.from_bytes(data=img["data"], mime_type=img["mime_type"]))
+                        total_img_bytes += size
+                    else:
+                        label = f"[Tool output image ({size // 1024} KB — omitted; {spent // (1024*1024)} MB image budget)]"
+                        parts.append(types.Part.from_text(text=label))
                 full_prompt.append({"role": "user", "parts": parts})
 
             elif role == "model":
@@ -80,9 +111,28 @@ class GeminiBackend(ChatBackend):
                 for f in e["other_files"]:
                     label = f"[Attached file: {f['filename']}; asset_id={f['asset_id']}; mime_type={f['mime_type']}]"
                     parts.append(types.Part.from_text(text=label))
-                for img in e["images"]:
-                    parts.append(types.Part.from_bytes(data=img["data"], mime_type=img["mime_type"]))
+                for j, img in enumerate(e["images"]):
+                    size = len(img.get("data", b""))
+                    if (i, j) in keep_img_keys:
+                        parts.append(types.Part.from_bytes(data=img["data"], mime_type=img["mime_type"]))
+                        total_img_bytes += size
+                    else:
+                        label = f"[Attached image ({size // 1024} KB — omitted; {spent // (1024*1024)} MB image budget)]"
+                        parts.append(types.Part.from_text(text=label))
                 full_prompt.append({"role": "user", "parts": parts})
+
+        # Log approximate payload size so we can correlate with
+        # proxy-level errors like "failed to read request body".
+        text_chars = sum(
+            len(str(p.text)) if hasattr(p, 'text') and p.text else 0
+            for entry in full_prompt
+            for p in (entry["parts"] if isinstance(entry.get("parts"), list) else [])
+        )
+        print(
+            f"Chat: sending ~{text_chars} chars text + "
+            f"{total_img_bytes // 1024} KB images = "
+            f"~{(text_chars + total_img_bytes) // 1024} KB total"
+        )
 
         if self.jailbreak_prompt:
             full_prompt.append({
