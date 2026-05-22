@@ -269,6 +269,40 @@ class ChatBackend(ABC):
 
         return resolved
     
+    async def resolve_context_entries(
+        self, context: list[dict[str, Any]] | None, asset_store: Any | None
+    ) -> list[dict[str, Any]]:
+        """Resolve every context message's files once, splitting images from attachments.
+
+        Each returned entry has keys: role, name, text, images, other_files, raw.
+        *images* are dicts with ``data`` and ``mime_type`` (ready for embedding).
+        *other_files* are dicts with ``filename``, ``mime_type``, and ``asset_id``.
+        """
+        entries: list[dict[str, Any]] = []
+        for msg in context or self.context:
+            files = await self.resolve_context_files(msg, asset_store)
+            images: list[dict[str, Any]] = []
+            other: list[dict[str, Any]] = []
+            for f in files:
+                ct = f.get("content_type", "")
+                if ct.startswith("image/") and f.get("data"):
+                    images.append({"data": f["data"], "mime_type": ct})
+                else:
+                    other.append({
+                        "filename": f.get("filename", ""),
+                        "mime_type": ct,
+                        "asset_id": f.get("asset_id", ""),
+                    })
+            entries.append({
+                "role": msg.get("role", "user"),
+                "name": msg.get("name", ""),
+                "text": msg.get("content", ""),
+                "images": images,
+                "other_files": other,
+                "raw": msg.get("raw"),
+            })
+        return entries
+
     def pop_context(self, index: int = 0):
         self.context.pop(index)
 

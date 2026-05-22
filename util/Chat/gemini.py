@@ -41,99 +41,55 @@ class GeminiBackend(ChatBackend):
         self.model = model
 
     async def _generate_reply(self, context: Optional[List[Dict[str, Any]]] = None, use_system_prompt:bool = True, **kwargs) -> Any:
-        # Construct prompt from context
-        full_prompt = []
-        system_instruction = self.system_prompt
-                
-        # Add memory
-        if self.memory:
-            memory = {
-                'role': 'model',
-                'parts': [types.Part.from_text(text=f"Memory: {self.memory}")]
-            }
-            full_prompt.append(memory)
-
-        ctx = context if context is not None else self.context
         asset_store = kwargs.get("asset_store")
-        for msg in ctx:
-            role = msg['role']
-            
-            if role == 'tool_call':
-                if msg.get('raw'):
-                    # Use the exact funciton call part stored in history
-                    part = msg['raw']
+        entries = await self.resolve_context_entries(context, asset_store)
+
+        full_prompt: list[dict[str, Any]] = []
+
+        if self.memory:
+            full_prompt.append({
+                "role": "model",
+                "parts": [types.Part.from_text(text=f"Memory: {self.memory}")],
+            })
+
+        for e in entries:
+            role = e["role"]
+
+            if role == "tool_call":
+                part = e["raw"] if e.get("raw") else self._fallback_tool_call_part(e)
+                full_prompt.append({"role": "model", "parts": [part]})
+
+            elif role == "tool_result":
+                parts: list[Any] = [
+                    types.Part.from_function_response(name=e["name"], response={"result": e["text"]})
+                ]
+                for img in e["images"]:
+                    parts.append(types.Part.from_bytes(data=img["data"], mime_type=img["mime_type"]))
+                full_prompt.append({"role": "user", "parts": parts})
+
+            elif role == "model":
+                if e.get("raw"):
+                    raw = e["raw"]
+                    parts = raw if isinstance(raw, list) else [raw]
                 else:
-                    # We shouldn't get here!
-                    try:
-                        args = json.loads(msg['content'])
-                    except Exception:
-                        args = {}
-                    part = types.Part.from_function_call(name=msg['name'], args=args)
-                content = {'role': 'model', 'parts': [part]}
-                
-            elif role == 'tool_result':
-                part = types.Part.from_function_response(name=msg['name'], response={"result": msg['content']})
-                content = {'role': 'user', 'parts': [part]}
-                
-                # Resolve and append images so the model can "see" the result
-                files = await self.resolve_context_files(msg, asset_store)
-                for file_info in files:
-                    content_type = file_info.get('content_type') or "application/octet-stream"
-                    if content_type.startswith("image/") and file_info.get('data') is not None:
-                        content['parts'].append(
-                            types.Part.from_bytes(
-                                data=file_info['data'],
-                                mime_type=content_type,
-                            )
-                        )
-                
-            elif role == 'model':
-                if msg.get('raw'):
-                    # raw could be a Part or a list of Parts
-                    parts = msg['raw'] if isinstance(msg['raw'], list) else [msg['raw']]
-                    content = {'role': 'model', 'parts': parts}
-                else:
-                    part = types.Part.from_text(text=msg['content'])
-                    content = {'role': 'model', 'parts': [part]}
+                    parts = [types.Part.from_text(text=e["text"])]
+                full_prompt.append({"role": "model", "parts": parts})
 
-            else:
-                gemini_role = 'user'
-                prefix = f"[User: {msg['name']}]\n"
-                part = types.Part.from_text(text=f"{prefix}{msg['content']}")
-                content = {'role': gemini_role, 'parts': [part]}
+            else:  # user
+                parts = [types.Part.from_text(text=f"[User: {e['name']}]\n{e['text']}")]
+                for f in e["other_files"]:
+                    label = f"[Attached file: {f['filename']}; asset_id={f['asset_id']}; mime_type={f['mime_type']}]"
+                    parts.append(types.Part.from_text(text=label))
+                for img in e["images"]:
+                    parts.append(types.Part.from_bytes(data=img["data"], mime_type=img["mime_type"]))
+                full_prompt.append({"role": "user", "parts": parts})
 
-                files = await self.resolve_context_files(msg, asset_store)
-                for file_info in files:
-                    content_type = file_info.get('content_type') or "application/octet-stream"
-                    asset_id = file_info.get('asset_id') or "unknown"
-                    filename = file_info.get('filename') or asset_id or "file"
-                    content['parts'].append(
-                        types.Part.from_text(
-                            text=f"[Attached file: {filename}; asset_id={asset_id}; mime_type={content_type}]"
-                        )
-                    )
-                    if content_type.startswith("image/") and file_info.get('data') is not None:
-                        content['parts'].append(
-                            types.Part.from_bytes(
-                                data=file_info['data'],
-                                mime_type=content_type,
-                            )
-                        )
-                    else:
-                        content['parts'].append(
-                            types.Part.from_text(text=f"[Attached file: {filename} ({content_type})]")
-                        )
-            full_prompt.append(content)
-
-        # Add jailbreak prompt
         if self.jailbreak_prompt:
-            jb = {
-                'role': "model",
-                'parts': [types.Part.from_text(text=self.jailbreak_prompt)]
-            }
-            full_prompt.append(jb)
+            full_prompt.append({
+                "role": "model",
+                "parts": [types.Part.from_text(text=self.jailbreak_prompt)],
+            })
 
-        # Format tools for Google GenAI
         tool_schemas = kwargs.get("tools")
         genai_tools = [{"function_declarations": tool_schemas}] if tool_schemas else None
 
@@ -142,18 +98,25 @@ class GeminiBackend(ChatBackend):
             "top_p": kwargs.get("top_p"),
             "temperature": kwargs.get("temperature"),
             "max_output_tokens": kwargs.get("max_new_tokens"),
-            "tools": genai_tools
+            "tools": genai_tools,
         }
-        if use_system_prompt and system_instruction:
-            config_kwargs["system_instruction"] = system_instruction
-            
+        if use_system_prompt and self.system_prompt:
+            config_kwargs["system_instruction"] = self.system_prompt
+
         config = genai.types.GenerateContentConfig(**config_kwargs)
 
         print(full_prompt)
-        # Use native async client to avoid blocking the event loop
-        response = await self.client.aio.models.generate_content(model=self.model, contents=full_prompt, config=config)
-        
-        return response
+        return await self.client.aio.models.generate_content(
+            model=self.model, contents=full_prompt, config=config
+        )
+
+    @staticmethod
+    def _fallback_tool_call_part(msg: dict[str, Any]) -> Any:
+        try:
+            args = json.loads(msg["content"])
+        except Exception:
+            args = {}
+        return types.Part.from_function_call(name=msg["name"], args=args)
 
     def _is_tool_call(self, reply_obj: Any) -> bool:
         return bool(reply_obj.function_calls)
