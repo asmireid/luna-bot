@@ -14,93 +14,92 @@ class OpenAILikeBackend(ChatBackend):
                 system_prompt: str = None,
                 summarize_prompt: str = None,
                 jailbreak_prompt: str = None,
-                bot_name: str = "Luna"):
-        super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, summarize_prompt=summarize_prompt, jailbreak_prompt=jailbreak_prompt, bot_name=bot_name)
+                bot_name: str = "Luna",
+                db_path: str = "data/chat_history.db"):
+        super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, summarize_prompt=summarize_prompt, jailbreak_prompt=jailbreak_prompt, bot_name=bot_name, db_path=db_path)
         # Assuming this is standard async OpenAI usage for async context
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self.model = model
 
     async def _generate_reply(self, context: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Any:
-        messages = []
-        system_instruction = self.system_prompt
-        if system_instruction:
-            messages.append({"role": "system", "content": system_instruction})
-        
+        asset_store = kwargs.get("asset_store")
+        entries = await self.resolve_context_entries(context, asset_store)
+
+        messages: list[dict[str, Any]] = []
+
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
         if self.memory:
             messages.append({"role": "system", "content": f"Memory: {self.memory}"})
 
-        ctx = context if context is not None else self.context
-        asset_store = kwargs.get("asset_store")
-        for msg in ctx:
-            role = msg['role']
-            
-            if role == 'tool_call':
-                if isinstance(msg.get('raw'), dict) and msg['raw'].get('tool_calls'):
-                    messages.append(msg['raw'])
+        for e in entries:
+            role = e["role"]
+
+            if role == "tool_call":
+                raw = e.get("raw")
+                if isinstance(raw, dict) and raw.get("tool_calls"):
+                    messages.append(raw)
                 else:
-                    # Fallback for older history or foreign backend-specific raw objects.
                     messages.append({
                         "role": "assistant",
                         "content": None,
                         "tool_calls": [{
                             "id": "call_fallback",
                             "type": "function",
-                            "function": {
-                                "name": msg['name'],
-                                "arguments": msg['content']
-                            }
-                        }]
+                            "function": {"name": e["name"], "arguments": e["text"]},
+                        }],
                     })
-                    
-            elif role == 'tool_result':
-                raw = msg.get('raw')
-                # Try to find the matching tool_call_id
-                # In most cases, there's only one tool call in the context preceding this result
+
+            elif role == "tool_result":
+                raw = e.get("raw")
                 tool_call_id = "call_fallback"
-                if isinstance(raw, dict) and raw.get('tool_calls'):
-                    tool_call_id = raw['tool_calls'][0]['id']
-                
+                if isinstance(raw, dict) and raw.get("tool_calls"):
+                    tool_call_id = raw["tool_calls"][0]["id"]
+
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call_id,
-                    "content": msg['content']
+                    "content": e["text"],
                 })
-                
-            elif role == 'model':
-                if isinstance(msg.get('raw'), dict):
-                    messages.append(msg['raw'])
-                else:
-                    messages.append({"role": "assistant", "content": msg['content']})
-            else:
-                openai_role = 'user'
-                text_content = f"[User: {msg['name']}]\n{msg['content']}"
-                files = await self.resolve_context_files(msg, asset_store)
 
-                if files:
-                    content_parts = [{"type": "text", "text": text_content}]
-                    for file_info in files:
-                        content_type = file_info.get('content_type') or "application/octet-stream"
-                        asset_id = file_info.get('asset_id') or "unknown"
-                        filename = file_info.get('filename') or asset_id or "file"
-                        content_parts.append({
-                            "type": "text",
-                            "text": f"[Attached file: {filename}; asset_id={asset_id}; mime_type={content_type}]"
-                        })
-                        if content_type.startswith("image/") and file_info.get('data') is not None:
-                            b64_data = base64.b64encode(file_info['data']).decode('utf-8')
-                            content_parts.append({
-                                "type": "image_url",
-                                "image_url": {"url": f"data:{content_type};base64,{b64_data}"}
-                            })
-                        else:
-                            content_parts.append({
-                                "type": "text",
-                                "text": f"[Attached file: {filename} ({content_type})]"
-                            })
-                    messages.append({'role': openai_role, 'content': content_parts})
+                # OpenAI tool-role messages can't carry images; emit a user follow-up
+                if e["images"]:
+                    image_parts: list[dict[str, Any]] = [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{img['mime_type']};base64,{base64.b64encode(img['data']).decode('utf-8')}"},
+                        }
+                        for img in e["images"]
+                    ]
+                    messages.append({
+                        "role": "user",
+                        "content": [{"type": "text", "text": "Visual output from the tool:"}] + image_parts,
+                    })
+
+            elif role == "model":
+                if isinstance(e.get("raw"), dict):
+                    messages.append(e["raw"])
                 else:
-                    messages.append({'role': openai_role, 'content': text_content})
-        
+                    messages.append({"role": "assistant", "content": e["text"]})
+
+            else:  # user
+                text = f"[User: {e['name']}]\n{e['text']}"
+                if e["images"] or e["other_files"]:
+                    parts: list[dict[str, Any]] = [{"type": "text", "text": text}]
+                    for f in e["other_files"]:
+                        parts.append({
+                            "type": "text",
+                            "text": f"[Attached file: {f['filename']}; asset_id={f['asset_id']}; mime_type={f['mime_type']}]",
+                        })
+                    for img in e["images"]:
+                        parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{img['mime_type']};base64,{base64.b64encode(img['data']).decode('utf-8')}"},
+                        })
+                    messages.append({"role": "user", "content": parts})
+                else:
+                    messages.append({"role": "user", "content": text})
+
         if self.jailbreak_prompt:
             messages.append({"role": "system", "content": self.jailbreak_prompt})
 

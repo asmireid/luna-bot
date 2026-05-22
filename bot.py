@@ -32,7 +32,7 @@ async def on_ready():
     print(f"{time_prefix} Bot ID {bot.user.id}")
     print(f"{time_prefix} Discord.py Version {discord.__version__}")
     print(f"{time_prefix} Python Version {platform.python_version()}")
-    get_or_create_asset_store(bot)
+    get_or_create_asset_store(bot, base_dir="data/assets")
     await update()
 
 

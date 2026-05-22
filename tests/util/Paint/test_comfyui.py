@@ -66,6 +66,7 @@ async def test_generate_payload(sample_workflow, mocker):
     
     payload = backend._generate_workflow_payload(
         "test_workflow.json", 
+        backend.workflow_vars,
         PositivePrompt="new prompt", 
         NegativePrompt="new neg"
     )

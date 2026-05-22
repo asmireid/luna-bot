@@ -173,12 +173,8 @@ class SetConfig(commands.Cog):
                                descr="Configs are retrieved.")
 
         try:
-            options_and_values = {str(prop): getattr(configs, str(prop)) for prop in dir(configs) if
-                                  isinstance(getattr(type(configs), str(prop), None), property)}
-            for option, value in options_and_values.items():
-                # only list non-sensitive configs
-                if not configs.is_sensitive(option):
-                    msg_embed.add_field(name=option, value=value)
+            for option, value in configs.list_options().items():
+                msg_embed.add_field(name=option, value=value)
 
             await try_reply(ctx, msg_embed)
         except Exception as e:

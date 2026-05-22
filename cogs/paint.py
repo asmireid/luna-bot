@@ -19,7 +19,6 @@ class Paint(commands.Cog):
         self.worker_task = asyncio.create_task(self._paint_worker())
 
     def _load_backend(self):
-        self.configs = Config()
         # Default to ComfyUI if not specified
         backend_name = getattr(self.configs, 'paint_backend', 'comfyui')
         print(f"Paint initialized with {backend_name.capitalize()} Backend.")
@@ -28,7 +27,7 @@ class Paint(commands.Cog):
             self.backend = ComfyUIBackend(
                 server_address=getattr(self.configs, 'comfyui_url', "127.0.0.1:8188"),
                 comfyui_workflow_folder=getattr(self.configs, 'comfyui_workflow_folder', "comfyui_workflows"),
-                workflow_file=getattr(self.configs, 'workflow', "Image_Anime_ChenkinNoob.json")
+                workflow_file=getattr(self.configs, 'workflow', "SDXL_example.json")
             )
         else:
             # Fallback or placeholder for other backends like NovelAI
@@ -144,14 +143,20 @@ class Paint(commands.Cog):
             kwargs['negative_prompt'] = kwargs.pop('neg')
         return prompt, kwargs
 
-    @commands.command(aliases=['plv', 'pvars', 'paint_vars'], help="Lists available variables for the current paint backend")
+    @commands.command(aliases=['plv', 'pvars', 'paint_vars'], help="Lists available variables and notes for the current paint backend")
     async def list_paint_vars(self, ctx):
         variables = self.backend.get_variables()
-        if not variables:
-            await try_reply(ctx, "No customizable variables found.")
+        notes = self.backend.get_workflow_notes()
+        
+        descr = "Available variables and their defaults:"
+        if notes:
+            descr = f"📝 {notes[:500]}\n\n{descr}"
+        
+        if not variables and not notes:
+            await try_reply(ctx, "No customizable variables or notes found.")
             return
 
-        msg_embed = make_embed(ctx, title="Paint Variables", descr="Available variables and their defaults:")
+        msg_embed = make_embed(ctx, title="Paint Variables", descr=descr)
         for var, default in variables.items():
             msg_embed.add_field(name=var, value=f"{default}", inline=False)
         

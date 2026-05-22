@@ -2,32 +2,33 @@ import pytest
 from util.Chat.gemini import GeminiBackend
 
 @pytest.mark.asyncio
-async def test_gemini_generate_reply(mocker):
+async def test_gemini_generate_reply(mocker, tmp_path):
     # Setup the mocks
     mock_client_class = mocker.patch('util.Chat.gemini.genai.Client')
     mock_client = mock_client_class.return_value
     
     mock_response = mocker.MagicMock()
     mock_response.text = "This is a mocked Gemini response"
-    mock_client.models.generate_content.return_value = mock_response
+    # Native async client uses client.aio.models.generate_content
+    mock_client.aio.models.generate_content = mocker.AsyncMock(return_value=mock_response)
     
-    # Initialize backend
-    backend = GeminiBackend(api_key="fake-key", context_limit=5)
+    # Initialize backend with temp db path
+    db_path = str(tmp_path / "test.db")
+    backend = GeminiBackend(api_key="fake-key", context_limit=5, db_path=db_path)
     
     # Test generation
     context = [
         {"role": "user", "name": "User", "content": "Hello Gemini!"}
     ]
     
-    # generate_content runs in an executor, but we mocked genai.Client
     reply = await backend._generate_reply(context=context, use_system_prompt=False)
     
     assert reply == mock_response
     
     # Verify the mock was called correctly
-    mock_client.models.generate_content.assert_called_once()
+    mock_client.aio.models.generate_content.assert_called_once()
     
-    args, kwargs = mock_client.models.generate_content.call_args
+    args, kwargs = mock_client.aio.models.generate_content.call_args
     assert kwargs['model'] == "gemini-3-flash-preview"
     assert len(kwargs['contents']) == 1  # 1 message in context
     

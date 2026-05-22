@@ -2,6 +2,8 @@ import os
 import logging
 import asyncio
 import mimetypes
+import io
+import discord
 from discord.ext import commands
 
 from utilities import *
@@ -37,7 +39,7 @@ class Chat(commands.Cog):
         if message is None:
             message = ""
 
-        asset_store = get_or_create_asset_store(ctx.bot)
+        asset_store = get_or_create_asset_store(ctx.bot, base_dir="data/assets")
         files = []
         if ctx.message.attachments:
             for attachment in ctx.message.attachments:
@@ -75,7 +77,9 @@ class Chat(commands.Cog):
     async def process_chat_queue(self):
         while not self.chat_queue.empty():
             message, params, ctx = await self.chat_queue.get()
+            await try_delete_invocation(ctx.message)
             params['ctx'] = ctx  # Inject ctx for tools that might need it
+            asset_store = params.get('asset_store')
             
             status_msg = None
             tool_logs = ""
@@ -97,6 +101,17 @@ class Chat(commands.Cog):
                             tool_logs += " ✅"
                             if status_msg:
                                 await status_msg.edit(content=f"🤔 Thinking...{tool_logs}")
+                            
+                            # Handle tool-generated files (e.g., from paint tool)
+                            new_files = update.get("files", [])
+                            if new_files and asset_store:
+                                discord_files = []
+                                for ref in new_files:
+                                    data = await asset_store.resolve_bytes(ref.asset_id)
+                                    discord_files.append(discord.File(io.BytesIO(data), filename=ref.filename or f"{ref.asset_id}.png"))
+                                
+                                if discord_files:
+                                    await try_reply(ctx, f"🛠️ `{update['tool_name']}` output:", files=discord_files)
                                 
                         elif update["type"] == "final":
                             final_text = update["content"]
@@ -106,6 +121,10 @@ class Chat(commands.Cog):
                                 final_content = f"{tool_logs}\n\n{final_text}"
                             else:
                                 final_content = final_text
+
+                            # Guard against empty responses (Discord rejects empty messages)
+                            if not final_content or not final_content.strip():
+                                final_content = "🤔 *(no response generated)*"
                                 
                             if status_msg:
                                 await status_msg.edit(content=final_content)
@@ -129,8 +148,8 @@ class Chat(commands.Cog):
 
     @commands.command(aliases=['清空', "忘记一切"], help="clears chat history")
     async def reset_chat(self, ctx):
-        self.backend.reset_context()
-        self.backend.reset_memory()
+        await self.backend.reset_context()
+        await self.backend.reset_memory()
         await try_reply(ctx, "阿巴阿巴！我忘记了一切！")
 
     @commands.command(help="displays the context")

@@ -7,6 +7,7 @@ from typing import List, Dict, Optional, Tuple, Any
 
 from util.Chat.tools import chat_tools
 from util.Media.types import AssetRef
+from util.Chat.storage import ChatStorage
 
 class ChatBackend(ABC):
     def __init__(self,
@@ -15,13 +16,19 @@ class ChatBackend(ABC):
                 system_prompt: str = None,
                 summarize_prompt: str = None,
                 jailbreak_prompt: str = None,
-                bot_name: str = "Luna"):
+                bot_name: str = "Luna",
+                db_path: str = "data/chat_history.db",
+                max_tool_calls: int = 8):
         self.context_limit = context_limit
         self.context_keep = context_keep
         self.system_prompt, self.summarize_prompt, self.jailbreak_prompt = self._load_prompts(system_prompt, summarize_prompt, jailbreak_prompt)
-        self.memory = ""
-        self.context: List[Dict[str, Any]] = []
         self.bot_name = bot_name
+        self.max_tool_calls = max_tool_calls
+        self.storage = ChatStorage(db_path)
+        
+        # Sync initial state from DB
+        self.memory = self.storage.get_memory()
+        self.context = self.storage.load_context(self.context_limit)
 
     def _load_prompt(self, prompt: str, kind: str) -> str:
         if prompt and os.path.isfile(prompt):
@@ -135,6 +142,8 @@ class ChatBackend(ABC):
         await self.add_context('user', message, author_name, files=files)
         
         timeout = kwargs.get('timeout')
+        max_tool_calls = kwargs.get('max_tool_calls', self.max_tool_calls)
+        tool_call_count = 0
 
         while True:
             yield {"type": "status", "content": "Generating response..."}
@@ -149,6 +158,12 @@ class ChatBackend(ABC):
                 reply_obj = await self._generate_reply(tools=tools_schema, **kwargs)
 
             if self._is_tool_call(reply_obj):
+                tool_call_count += 1
+                if tool_call_count > max_tool_calls:
+                    print(f"Chat: max tool calls ({max_tool_calls}) exceeded; forcing text response.")
+                    yield {"type": "final", "content": "I used too many tools already — let me summarize what I have so far."}
+                    break
+
                 tool_name, tool_args, raw_part = self._extract_tool_info(reply_obj)
                 
                 yield {"type": "tool_start", "tool_name": tool_name, "args": tool_args}
@@ -163,9 +178,20 @@ class ChatBackend(ABC):
                 # Record the tool's result
                 await self.add_context('tool_result', result_text, tool_name, files=result.files, raw=raw_part)
                 
-                yield {"type": "tool_end", "tool_name": tool_name, "result": result_text}
+                yield {"type": "tool_end", "tool_name": tool_name, "result": result_text, "files": result.files}
             else:
                 reply_text = self._extract_text(reply_obj)
+                if not reply_text or not reply_text.strip():
+                    print(f"Chat: WARNING — model returned empty text. reply_obj keys: {dir(reply_obj) if not isinstance(reply_obj, dict) else list(reply_obj.keys())}")
+                    # The model produced nothing meaningful.  Yield a minimal
+                    # placeholder to the user (Discord won't accept blank
+                    # messages), but do NOT record this turn in context —
+                    # storing any string here would teach the model that
+                    # silence is a valid conversational pattern.
+                    reply_text = "(empty response)"
+                    yield {"type": "final", "content": reply_text}
+                    break
+
                 raw_part = self._extract_raw(reply_obj)
                 await self.add_context('model', reply_text, self.bot_name, raw=raw_part)
                 yield {"type": "final", "content": reply_text}
@@ -184,30 +210,58 @@ class ChatBackend(ABC):
         if context is None:
             context = self.context
 
-        # Create a temporary context for summarization to avoid modifying the main context
-        temp_context = context.copy()
+        # Strip tool-call / tool-result entries and files — summarization
+        # only needs conversational turns.  Tool entries are transient and
+        # can be orphaned if summarization fires mid-pipeline.
+        stripped_context: list[dict[str, Any]] = []
+        for entry in context:
+            if entry.get('role') in ('tool_call', 'tool_result'):
+                continue
+            stripped_entry = {k: v for k, v in entry.items() if k != 'files'}
+            stripped_context.append(stripped_entry)
+
+        temp_context: list[dict[str, Any]] = stripped_context.copy()
         temp_context.append({'role': 'user', 'content': self.summarize_prompt, 'name': "system"})
 
         reply = await self._generate_reply(context=temp_context, use_system_prompt=False, **kwargs)
-        
-        self.memory = reply
+
+        reply_text = self._extract_text(reply)
+        self.memory = reply_text
+        await self.storage.set_memory(reply_text)
         print(f"Chat: summary updated: {self.memory}")
 
-        return reply
+        return reply_text
 
     async def add_context(self, role: str, content: str, name: str, files:list = None, raw: Any = None):
         if files is None:
             files = []
         print(f"Chat: adding context ({role}, {name}): {content[:50]}...")
+        
+        # Save to DB (non-blocking)
+        await self.storage.save_message(role, content, name, files=files, raw=raw)
+        
+        # Update in-memory cache
         self.context.append({'role': role, 'content': content, 'name': name, 'files': files, 'raw': raw})
-        if len(self.context) > self.context_limit:
+        
+        # Only conversational turns (user / model) count toward the limit.
+        # Tool-call and tool-result entries are transient scaffolding that
+        # must stay paired; summarization between them creates orphaned
+        # function calls the model rejects as MALFORMED_FUNCTION_CALL.
+        if (role in ('user', 'model')
+                and sum(1 for e in self.context if e['role'] in ('user', 'model')) > self.context_limit):
             print("Chat: context limit reached.")
-            
+
             # Snapshot the context to summarize and clear the main context
             context_to_summarize = self.context[:]
-            self.reset_context(self.context_keep)
+            await self.reset_context(self.context_keep)
 
-            asyncio.create_task(self.summarize(context_to_summarize))
+            try:
+                # Block — summarization must finish before the next turn
+                # to avoid races with in-flight tool executions.
+                await self.summarize(context_to_summarize)
+            except Exception as e:
+                import logging
+                logging.error(f"Summarization failed: {e}", exc_info=True)
 
     async def resolve_context_files(self, msg: Dict[str, Any], asset_store: Any | None = None) -> List[Dict[str, Any]]:
         resolved = []
@@ -244,14 +298,50 @@ class ChatBackend(ABC):
 
         return resolved
     
+    async def resolve_context_entries(
+        self, context: list[dict[str, Any]] | None, asset_store: Any | None
+    ) -> list[dict[str, Any]]:
+        """Resolve every context message's files once, splitting images from attachments.
+
+        Each returned entry has keys: role, name, text, images, other_files, raw.
+        *images* are dicts with ``data`` and ``mime_type`` (ready for embedding).
+        *other_files* are dicts with ``filename``, ``mime_type``, and ``asset_id``.
+        """
+        entries: list[dict[str, Any]] = []
+        for msg in context or self.context:
+            files = await self.resolve_context_files(msg, asset_store)
+            images: list[dict[str, Any]] = []
+            other: list[dict[str, Any]] = []
+            for f in files:
+                ct = f.get("content_type", "")
+                if ct.startswith("image/") and f.get("data"):
+                    images.append({"data": f["data"], "mime_type": ct})
+                else:
+                    other.append({
+                        "filename": f.get("filename", ""),
+                        "mime_type": ct,
+                        "asset_id": f.get("asset_id", ""),
+                    })
+            entries.append({
+                "role": msg.get("role", "user"),
+                "name": msg.get("name", ""),
+                "text": msg.get("content", ""),
+                "images": images,
+                "other_files": other,
+                "raw": msg.get("raw"),
+            })
+        return entries
+
     def pop_context(self, index: int = 0):
         self.context.pop(index)
 
-    def reset_context(self, keep=None):
+    async def reset_context(self, keep=None):
+        await self.storage.clear_context(keep=keep)
         if not keep:
             self.context = []
         else:
             self.context = self.context[-keep:]
     
-    def reset_memory(self):
+    async def reset_memory(self):
         self.memory = ''
+        await self.storage.set_memory('')

@@ -1,4 +1,4 @@
-from __future__ import annotations
+import base64
 
 from io import BytesIO
 
@@ -18,35 +18,33 @@ from util.Chat.tools import chat_tools
         "type": "object",
         "properties": {
             "image": {
-                "type": "object",
+                "type": "string",
                 "description": (
-                    "The input image file to inspect. "
-                    "For attached files, pass the available image/file reference for this image here."
+                    "The asset id or data URI of the image to inspect. "
+                    "Pass the image reference string here."
                 ),
-                "properties": {
-                    "asset_id": {
-                        "type": "string",
-                        "description": "The asset id for the input image file.",
-                    },
-                    "filename": {
-                        "type": "string",
-                        "description": "Optional original filename for the image.",
-                    },
-                },
-                "required": ["asset_id"],
             },
         },
         "required": ["image"],
     },
 )
-def count_image_pixels(image: dict) -> str:
-    image_bytes = image.get("data")
-    if image_bytes is None:
-        raise ValueError("Missing image data.")
+def count_image_pixels(image: str) -> str:
+    if image.startswith("data:"):
+        try:
+            # Format: data:image/png;base64,iVBOR...
+            header, data = image.split(",", 1)
+            image_bytes = base64.b64decode(data)
+        except Exception as e:
+            raise ValueError(f"Invalid Data URI: {e}")
+    else:
+        # Fallback if it's somehow just raw b64 or other string (though usually it will be Data URI now)
+        try:
+            image_bytes = base64.b64decode(image)
+        except Exception:
+            raise ValueError("Input must be a Data URI or base64 string.")
 
     with Image.open(BytesIO(image_bytes)) as img:
         width, height = img.size
 
     total_pixels = width * height
-    filename = image.get("filename") or "image"
-    return f"{filename} is {width}x{height}, for a total of {total_pixels} pixels."
+    return f"Image is {width}x{height}, for a total of {total_pixels} pixels."

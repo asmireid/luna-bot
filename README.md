@@ -1,38 +1,69 @@
-# Luna Bot
+# Luna Agent
 
-Luna Bot is a versatile Discord bot powered by `discord.py`. It provides AI-driven chat, image generation through ComfyUI, high-quality Text-to-Speech (TTS), and a range of utility and moderation tools.
+Luna is a sophisticated Discord agent powered by `discord.py`. More than just a bot, Luna features an autonomous tool-execution system, Model Context Protocol (MCP) integration, and multimodal capabilities, allowing it to perceive and interact with the world through a variety of extensible "skills."
 
 ---
 
-## Features
+## 🤖 Core Agentic Features
 
-### AI Chat
-- **Multiple Backends:** Supports Google Gemini, OpenAI-compatible APIs, and local LLMs.
-- **Multimodal Support:** Users can send images for visual analysis.
-- **Context Memory:** Maintains conversation history with automatic summarization to manage long interactions.
-- **Dynamic Prompting:** Supports customizable system, jailbreak, and summary prompts.
-- **Mention Trigger:** Responds directly when mentioned in a channel.
+### Autonomous Tool Execution
+- **Tool-Call Loop:** Luna can identify when a task requires external tools, execute them (sequentially or in parallel), and synthesize the results into a final response.
+- **Multimodal Perception:** Built-in support for visual analysis—send images or files, and Luna can use tools to "see" and describe them.
+- **Extensible Registry:** Easily add new capabilities via the Local Tool Provider or remote MCP servers.
 
-### Image Generation (Paint)
-- **ComfyUI Integration:** Generate images and videos directly from Discord.
-- **Workflow Management:** Switch between different ComfyUI JSON workflows dynamically.
-- **Customizable Parameters:** Fine-tune generations with CLI-style flags such as `--negative`, `--steps`, and `--cfg`.
+### Model Context Protocol (MCP) Support
+- **Dynamic Tool Discovery:** Connect to any MCP-compliant server (e.g., Google Search, Filesystem, specialized APIs) to instantly expand Luna's capabilities.
+- **Multiple Transports:** Supports both `stdio` (local subprocesses) and `http` (remote endpoints) for MCP servers.
+- **Unified Tool Interface:** Remote tools are seamlessly integrated into the chat flow with status updates and error handling.
+
+### Advanced Knowledge & Memory
+- **Multiple Backends:** Supports Google Gemini (with native tool-calling), OpenAI-compatible APIs, and local LLMs.
+- **Context Management:** Maintains deep conversation history with automatic summarization to manage long-term interactions.
+- **Asset Store:** A robust system for managing files, images, and tool outputs, ensuring data persistence across tool calls.
+
+---
+
+## 🎨 Image & Media Capabilities
+
+### ComfyUI Integration (Paint)
+- **Workflow-Based Generation:** Generate images and videos directly from Discord using ComfyUI.
+- **Dynamic Variable Injection:** Pass CLI-style flags (e.g., `--negative`, `--steps`) to override workflow parameters on the fly.
+- **Real-time Status:** Tracks generation progress and provides immediate feedback in the channel.
 
 ### Voice & TTS
-- **High-Quality TTS:** Powered by [BangDream-Bert-VITS2](https://huggingface.co/spaces/Mahiruoshi/BangDream-Bert-VITS2).
-- **Audio Streaming:** Play audio from YouTube, SoundCloud, and other platforms via `yt-dlp`.
-- **Local Playback:** Play audio files directly from the server's local storage.
-- **Queue System:** Manage playback with pause, resume, skip, and queue management.
-
-### Utilities & Moderation
-- **Calculations:** Evaluate mathematical expressions and number representations (binary, hex, etc.).
-- **Randomization:** Includes a dice roller, Magic 8-Ball, and a joke system.
-- **Moderation Tools:** Essential commands for managing members (kick, ban, unban) and clearing messages.
-- **Runtime Configuration:** Modify bot settings like prefix, name, and activity without restarting.
+- **High-Quality Speech:** Powered by [BangDream-Bert-VITS2](https://huggingface.co/spaces/Mahiruoshi/BangDream-Bert-VITS2).
+- **Audio Streaming:** Seamless playback from YouTube, SoundCloud, and other platforms via `yt-dlp`.
+- **Intelligent Queueing:** Full-featured audio controller with play, skip, pause, and local storage playback.
 
 ---
 
-## Installation
+## 🛠️ Tooling & Extension
+
+### Adding Tools
+Luna can be extended in two ways:
+1.  **Local Tools:** Add Python scripts to `util/tools/` and register them using the `@manager.register` decorator.
+2.  **MCP Servers:** Add external servers to `config/tool_providers.json`.
+
+Example `tool_providers.json` configuration:
+```json
+{
+  "providers": [
+    {
+      "id": "web-search",
+      "type": "mcp",
+      "enabled": true,
+      "settings": {
+        "transport": "stdio",
+        "command": "npx -y @modelcontextprotocol/server-google-search"
+      }
+    }
+  ]
+}
+```
+
+---
+
+## 🚀 Installation
 
 1. **Clone the repository:**
    ```bash
@@ -40,7 +71,7 @@ Luna Bot is a versatile Discord bot powered by `discord.py`. It provides AI-driv
    cd luna-bot
    ```
 
-2. **Set up a virtual environment (Recommended):**
+2. **Set up a virtual environment:**
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -51,72 +82,28 @@ Luna Bot is a versatile Discord bot powered by `discord.py`. It provides AI-driv
    pip install -r requirements.txt
    ```
 
-4. **Configure the bot:**
-   - Copy `config/template_config.ini` to `config.ini`.
-   - Fill in your `bot_token` and the necessary API keys for Gemini or OpenAI.
-   - (Optional) Configure ComfyUI URL and workflow paths if utilizing image generation.
+4. **Configuration:**
+   - Copy `config/template_config.ini` to `config.ini` and fill in your API keys.
+   - Configure tool providers in `config/tool_providers.json`.
 
-5. **Run the bot:**
+5. **Run the agent:**
    ```bash
    python bot.py
    ```
 
 ---
 
-## Configuration
+## ⌨️ Primary Commands
 
-Luna Bot is configured via `config.ini`. Key sections include:
-- `[credentials]`: API keys and bot tokens.
-- `[customizations]`: Bot name, activity, and embed footers.
-- `[chat_settings]`: LLM parameters such as temperature, model selection, and context limits.
-- `[paint_settings]`: ComfyUI connection details and workflow defaults.
-- `[tts_settings]`: Speaker selection for TTS.
-
----
-
-## Command Reference
-
-### AI Chat
-- `!chat <message>`: Chat with the AI (supports image attachments).
-- `!reset_chat`: Clear the current conversation history.
-- `!display_context`: Show the current stored conversation context.
-
-### Image Generation (Paint)
-- `!paint <prompt> [--flag value]`: Generate an image or video.
-- `!list_workflows`: List available ComfyUI workflows.
-- `!list_paint_vars`: List customizable variables for the current workflow.
-
-### Voice & Audio
-- `!play_url <url>`: Play audio from a URL.
-- `!play_local <path>`: Play a local file or all files in a directory.
-- `!tts <text>`: Convert text to speech.
-- `!queue`: Display the current audio queue.
-- `!skip`, `!pause`, `!resume`: Control current playback.
-
-### Utilities & Fun
-- `!roll <xdy+z>`: Roll dice (e.g., `2d20+5`).
-- `!calculator <expression>`: Evaluate math (e.g., `sin(pi/2) * 10`).
-- `!represent <number>`: Show decimal, binary, octal, and hex forms.
-- `!joke`: Get a random joke.
-- `!8ball <question>`: Get an answer from the Magic 8-Ball.
-- `!choose <option1> <option2> ...`: Pick between multiple choices.
-
-### Moderation
-- `!clear <amount>`: Delete a specified number of recent messages.
-- `!kick`, `!ban`, `!unban`: Manage server members.
-- `!userinfo`, `!serverinfo`: View detailed information about a user or the server.
-
-### Configuration
-- `!set <option> <value>`: Update a configuration setting at runtime.
-- `!get <option>`: Retrieve the current value of a setting.
-- `!list_config`: List all non-sensitive configuration settings.
+- `!chat <message>`: Start an agentic conversation (supports attachments).
+- `!reset_chat`: Clear conversation context and memory.
+- `!display_context`: Inspect the current agent state and history.
+- `!paint <prompt> [flags]`: Trigger a ComfyUI image generation.
+- `!tts <text>`: Synthesize speech from text.
+- `!set <option> <value>`: Configure the agent at runtime.
 
 ---
 
-## Contributing
-
-Contributions are welcome. Please submit a Pull Request or open an issue for any bugs or feature requests.
-
-## License
+## 📜 License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

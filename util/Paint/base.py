@@ -29,9 +29,25 @@ class PaintBackend(ABC):
         pass
 
     @abstractmethod
-    def get_variables(self) -> Dict[str, Any]:
+    def get_variables(self, workflow: str = None) -> Dict[str, Any]:
         """
         Returns a dictionary of available variables and their default values.
+        """
+        pass
+
+    @abstractmethod
+    def get_workflow_notes(self, workflow: str = None) -> str:
+        """
+        Returns the optional notes/instructions embedded in the workflow.
+        Returns empty string if no notes are present.
+        """
+        pass
+
+    @abstractmethod
+    def get_details(self, workflow: str = None) -> Dict[str, Any]:
+        """
+        Returns all inspectable details for a workflow.
+        Keys: notes, variables, output_types, input_slots
         """
         pass
 

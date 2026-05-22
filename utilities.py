@@ -1,11 +1,22 @@
 import asyncio
+import json
 import discord
+from dataclasses import is_dataclass, asdict
 from config.config import Config
+
+class EnhancedJSONEncoder(json.JSONEncoder):
+    def default(self, o):
+        if is_dataclass(o):
+            return asdict(o)
+        return super().default(o)
 
 
 async def try_delete_invocation(msg):
     if Config().delete_invocation:
-        await msg.delete()
+        try:
+            await msg.delete()
+        except Exception:
+            pass
 
 
 async def try_delete_confirmation(msg):
