@@ -202,17 +202,23 @@ class ChatBackend(ABC):
         if context is None:
             context = self.context
 
-        # Create a temporary context for summarization to avoid modifying the main context
-        temp_context = context.copy()
+        # Strip files/images from context — summarization only needs text
+        stripped_context = []
+        for entry in context:
+            stripped_entry = {k: v for k, v in entry.items() if k != 'files'}
+            stripped_context.append(stripped_entry)
+
+        temp_context = stripped_context.copy()
         temp_context.append({'role': 'user', 'content': self.summarize_prompt, 'name': "system"})
 
         reply = await self._generate_reply(context=temp_context, use_system_prompt=False, **kwargs)
         
-        self.memory = reply
-        await self.storage.set_memory(reply)
+        reply_text = self._extract_text(reply)
+        self.memory = reply_text
+        await self.storage.set_memory(reply_text)
         print(f"Chat: summary updated: {self.memory}")
 
-        return reply
+        return reply_text
 
     async def add_context(self, role: str, content: str, name: str, files:list = None, raw: Any = None):
         if files is None:
@@ -230,9 +236,16 @@ class ChatBackend(ABC):
             
             # Snapshot the context to summarize and clear the main context
             context_to_summarize = self.context[:]
-            self.reset_context(self.context_keep)
+            await self.reset_context(self.context_keep)
 
-            asyncio.create_task(self.summarize(context_to_summarize))
+            async def _safe_summarize():
+                try:
+                    await self.summarize(context_to_summarize)
+                except Exception as e:
+                    import logging
+                    logging.error(f"Summarization failed: {e}", exc_info=True)
+
+            asyncio.create_task(_safe_summarize())
 
     async def resolve_context_files(self, msg: Dict[str, Any], asset_store: Any | None = None) -> List[Dict[str, Any]]:
         resolved = []
