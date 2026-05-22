@@ -105,7 +105,7 @@ class GeminiBackend(ChatBackend):
 
         config = genai.types.GenerateContentConfig(**config_kwargs)
 
-        # print(full_prompt)
+        print(full_prompt)
         return await self.client.aio.models.generate_content(
             model=self.model, contents=full_prompt, config=config
         )
@@ -130,7 +130,24 @@ class GeminiBackend(ChatBackend):
         return "", {}, None
 
     def _extract_text(self, reply_obj: Any) -> str:
-        return reply_obj.text or ""
+        text = reply_obj.text or ""
+
+        # Surface safety-filter / empty-candidate information so operators
+        # can distinguish "character chose silence" from "content blocked".
+        if not text:
+            if reply_obj.prompt_feedback:
+                fb = reply_obj.prompt_feedback
+                if getattr(fb, 'block_reason', None):
+                    print(f"Chat: SAFETY BLOCK — reason={fb.block_reason}")
+            if reply_obj.candidates:
+                c = reply_obj.candidates[0]
+                reason = getattr(c, 'finish_reason', None)
+                if reason:
+                    print(f"Chat: finish_reason={reason}")
+                if not getattr(c, 'content', None) or not getattr(c.content, 'parts', None):
+                    print("Chat: candidate has no content/parts — likely safety block")
+
+        return text
 
     def _extract_raw(self, reply_obj: Any) -> Any:
         # Return all parts of the first candidate to preserve thoughts, text, and media

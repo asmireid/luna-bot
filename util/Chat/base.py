@@ -183,7 +183,15 @@ class ChatBackend(ABC):
                 reply_text = self._extract_text(reply_obj)
                 if not reply_text or not reply_text.strip():
                     print(f"Chat: WARNING — model returned empty text. reply_obj keys: {dir(reply_obj) if not isinstance(reply_obj, dict) else list(reply_obj.keys())}")
+                    # The model produced nothing meaningful.  Yield a minimal
+                    # placeholder to the user (Discord won't accept blank
+                    # messages), but do NOT record this turn in context —
+                    # storing any string here would teach the model that
+                    # silence is a valid conversational pattern.
                     reply_text = "(empty response)"
+                    yield {"type": "final", "content": reply_text}
+                    break
+
                 raw_part = self._extract_raw(reply_obj)
                 await self.add_context('model', reply_text, self.bot_name, raw=raw_part)
                 yield {"type": "final", "content": reply_text}
@@ -202,17 +210,21 @@ class ChatBackend(ABC):
         if context is None:
             context = self.context
 
-        # Strip files/images from context — summarization only needs text
-        stripped_context = []
+        # Strip tool-call / tool-result entries and files — summarization
+        # only needs conversational turns.  Tool entries are transient and
+        # can be orphaned if summarization fires mid-pipeline.
+        stripped_context: list[dict[str, Any]] = []
         for entry in context:
+            if entry.get('role') in ('tool_call', 'tool_result'):
+                continue
             stripped_entry = {k: v for k, v in entry.items() if k != 'files'}
             stripped_context.append(stripped_entry)
 
-        temp_context = stripped_context.copy()
+        temp_context: list[dict[str, Any]] = stripped_context.copy()
         temp_context.append({'role': 'user', 'content': self.summarize_prompt, 'name': "system"})
 
         reply = await self._generate_reply(context=temp_context, use_system_prompt=False, **kwargs)
-        
+
         reply_text = self._extract_text(reply)
         self.memory = reply_text
         await self.storage.set_memory(reply_text)
@@ -231,21 +243,25 @@ class ChatBackend(ABC):
         # Update in-memory cache
         self.context.append({'role': role, 'content': content, 'name': name, 'files': files, 'raw': raw})
         
-        if len(self.context) > self.context_limit:
+        # Only conversational turns (user / model) count toward the limit.
+        # Tool-call and tool-result entries are transient scaffolding that
+        # must stay paired; summarization between them creates orphaned
+        # function calls the model rejects as MALFORMED_FUNCTION_CALL.
+        if (role in ('user', 'model')
+                and sum(1 for e in self.context if e['role'] in ('user', 'model')) > self.context_limit):
             print("Chat: context limit reached.")
-            
+
             # Snapshot the context to summarize and clear the main context
             context_to_summarize = self.context[:]
             await self.reset_context(self.context_keep)
 
-            async def _safe_summarize():
-                try:
-                    await self.summarize(context_to_summarize)
-                except Exception as e:
-                    import logging
-                    logging.error(f"Summarization failed: {e}", exc_info=True)
-
-            asyncio.create_task(_safe_summarize())
+            try:
+                # Block — summarization must finish before the next turn
+                # to avoid races with in-flight tool executions.
+                await self.summarize(context_to_summarize)
+            except Exception as e:
+                import logging
+                logging.error(f"Summarization failed: {e}", exc_info=True)
 
     async def resolve_context_files(self, msg: Dict[str, Any], asset_store: Any | None = None) -> List[Dict[str, Any]]:
         resolved = []
