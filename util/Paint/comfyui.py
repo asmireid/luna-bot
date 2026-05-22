@@ -23,7 +23,7 @@ class ComfyUIBackend(PaintBackend):
         self.client_id = str(uuid.uuid4())
         self.comfyui_workflow_folder = comfyui_workflow_folder
         self.workflow_file = self._resolve_workflow_path(workflow_file)
-        self.workflow_vars, self.output_nodes, self.file_nodes = self._get_workflow_details(self.workflow_file)
+        self.workflow_vars, self.output_nodes, self.file_nodes, self.workflow_notes = self._get_workflow_details(self.workflow_file)
 
     def _resolve_workflow_path(self, workflow_name: str) -> str:
         if not workflow_name:
@@ -181,7 +181,10 @@ class ComfyUIBackend(PaintBackend):
         variables = {}
         output_nodes = {}
         file_nodes = {}
+        notes_parts = []
         for id, node in workflow_data.items():
+            if not isinstance(node, dict):
+                continue
             title = node.get('_meta', {'title': ''}).get('title', '')
             if title and title.startswith('[VAR]'):
                 var_name = title.replace('[VAR]', '').strip()
@@ -192,6 +195,11 @@ class ComfyUIBackend(PaintBackend):
                         keys.append(key)
                 val = (id, keys, vals)
                 variables[var_name] = val
+            elif title.startswith('[NOTE]'):
+                note_text = node.get("inputs", {}).get("value", "").strip()
+                if note_text:
+                    notes_parts.append(note_text)
+                continue
             else:
                 output_match = re.match(r'^\[OUTPUT:([^\]]+)\]', title or '', flags=re.IGNORECASE)
                 file_match = re.match(r'^\[FILE:([^:]+):(\d+)\]', title or '', flags=re.IGNORECASE)
@@ -206,12 +214,13 @@ class ComfyUIBackend(PaintBackend):
                         for key in node['inputs'].keys():
                             keys.append(key)
                     file_nodes[order] = (id, keys, expected_type)
-        return variables, output_nodes, file_nodes
+        notes = "\n\n".join(notes_parts)
+        return variables, output_nodes, file_nodes, notes
 
     def get_variables(self, workflow: str = None) -> Dict[str, Any]:
         if workflow:
             path = self._resolve_workflow_path(workflow)
-            vars, _, _ = self._get_workflow_details(path)
+            vars, _, _, _ = self._get_workflow_details(path)
         else:
             vars = self.workflow_vars
 
@@ -219,6 +228,35 @@ class ComfyUIBackend(PaintBackend):
         for name, (_, _, vals) in vars.items():
             variables[name] = vals[0] if len(vals) == 1 else vals
         return variables
+
+    def get_workflow_notes(self, workflow: str = None) -> str:
+        if workflow:
+            path = self._resolve_workflow_path(workflow)
+            _, _, _, notes = self._get_workflow_details(path)
+            return notes
+        return self.workflow_notes
+
+    def get_details(self, workflow: str = None) -> Dict[str, Any]:
+        if workflow:
+            path = self._resolve_workflow_path(workflow)
+            vars, outputs, files, notes = self._get_workflow_details(path)
+        else:
+            vars, outputs, files, notes = self.workflow_vars, self.output_nodes, self.file_nodes, self.workflow_notes
+
+        variables = {}
+        for name, (_, _, vals) in vars.items():
+            variables[name] = vals[0] if len(vals) == 1 else vals
+
+        input_slots = {}
+        for order, (_, keys, expected_type) in sorted(files.items()):
+            input_slots[order] = {"keys": keys, "expected_type": expected_type}
+
+        return {
+            "notes": notes,
+            "variables": variables,
+            "output_types": outputs,
+            "input_slots": input_slots,
+        }
 
     def list_workflows(self) -> List[str]:
         directory = os.path.dirname(self.workflow_file)
@@ -311,7 +349,7 @@ class ComfyUIBackend(PaintBackend):
         workflow_path = self._resolve_workflow_path(workflow_name)
         
         if workflow_path != self.workflow_file:
-             vars, output_nodes, file_nodes = self._get_workflow_details(workflow_path)
+             vars, output_nodes, file_nodes, _ = self._get_workflow_details(workflow_path)
         else:
              vars, output_nodes, file_nodes = self.workflow_vars, self.output_nodes, self.file_nodes
 

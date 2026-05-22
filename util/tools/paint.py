@@ -9,7 +9,7 @@ from util.Chat.tools import chat_tools
 
 @chat_tools.register(
     name="paint_list_workflows",
-    description="Lists all available image generation workflows (JSON files). Use this to see what styles or techniques are available.",
+    description="Lists all available image generation workflows (JSON files). Use this to browse what's available, then call paint_get_details for any workflow you want to use.",
     parameters={"type": "object", "properties": {}},
 )
 def paint_list_workflows(ctx) -> str:
@@ -25,31 +25,53 @@ def paint_list_workflows(ctx) -> str:
 
 
 @chat_tools.register(
-    name="paint_list_variables",
-    description="Lists customizable variables for a specific workflow. Use this to find out what parameters (like 'Width', 'Height', 'Steps', 'Seed', etc.) can be adjusted for a given workflow.",
+    name="paint_get_details",
+    description=(
+        "Inspect a specific generation workflow in detail. Returns: the workflow's notes/instructions "
+        "(model recommendations, prompt style guidance), customizable variables with their default values, "
+        "output media types, and input file slots for image-to-image/video workflows. "
+        "Call this before using 'paint' with a workflow you haven't inspected yet."
+    ),
     parameters={
         "type": "object",
         "properties": {
             "workflow": {
                 "type": "string",
-                "description": "The name of the workflow file to inspect (e.g., 'SDXL_ImageGen.json'). If omitted, uses the currently active default workflow."
+                "description": "The name of the workflow file to inspect (e.g., 'SDXL_example.json'). If omitted, uses the currently active default workflow."
             }
         }
     },
 )
-def paint_list_variables(ctx, workflow: Optional[str] = None) -> str:
+def paint_get_details(ctx, workflow: Optional[str] = None) -> str:
     paint_cog = ctx.bot.get_cog('Paint')
     if not paint_cog or not hasattr(paint_cog, 'backend'):
         return "Paint system is not initialized."
     
     try:
-        variables = paint_cog.backend.get_variables(workflow=workflow)
-        if not variables:
-            return f"No customizable variables ([VAR] tags) found in the workflow '{workflow or 'default'}'. You can still use 'paint' with just a prompt."
-        
-        return f"Variables for '{workflow or 'default'}':\n{json.dumps(variables, indent=2)}"
+        details = paint_cog.backend.get_details(workflow=workflow)
+        lines = [f"**Workflow details for '{workflow or 'default'}':**"]
+
+        notes = details.get("notes", "")
+        if notes:
+            lines.append(f"\n📝 **Notes:**\n{notes}")
+
+        variables = details.get("variables", {})
+        if variables:
+            lines.append(f"\n🎛️ **Variables:**\n```json\n{json.dumps(variables, indent=2)}\n```")
+        else:
+            lines.append("\n🎛️ **Variables:** (none — this workflow has no [VAR] nodes)")
+
+        output_types = details.get("output_types", {})
+        if output_types:
+            lines.append(f"\n📤 **Output types:**\n```json\n{json.dumps(output_types, indent=2)}\n```")
+
+        input_slots = details.get("input_slots", {})
+        if input_slots:
+            lines.append(f"\n📥 **Input file slots:**\n```json\n{json.dumps(input_slots, indent=2)}\n```")
+
+        return "\n".join(lines)
     except Exception as e:
-        return f"Error listing variables for workflow '{workflow}': {str(e)}"
+        return f"Error getting workflow details for '{workflow}': {str(e)}"
 
 
 @chat_tools.register(
@@ -65,11 +87,11 @@ def paint_list_variables(ctx, workflow: Optional[str] = None) -> str:
         "properties": {
             "prompt": {"type": "string", "description": "The positive prompt describing what you want to see."},
             "negative_prompt": {"type": "string", "description": "What you want to avoid in the generation."},
-            "workflow": {"type": "string", "description": "The workflow file to use (e.g., 'Anime.json'). See paint_list_workflows for options."},
+            "workflow": {"type": "string", "description": "The workflow file to use (e.g., 'Anime.json'). Call paint_list_workflows to browse, then paint_get_details for that workflow's variables and notes."},
             "image": {"type": "string", "description": "Optional asset ID of an image to use as input for Image-to-Image (e.g., 'img_8a2f123')."},
             "variables": {
                 "type": "object",
-                "description": "Custom variables for the workflow (e.g., {'Width': 1024, 'Height': 1024, 'Seed': 12345}). See paint_list_variables for available keys in a specific workflow.",
+                "description": "Custom variables for the workflow (e.g., {'Width': 1024, 'Height': 1024, 'Seed': 12345}). See paint_get_details for available keys and notes for a specific workflow.",
                 "additionalProperties": True
             }
         },

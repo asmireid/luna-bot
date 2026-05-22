@@ -17,7 +17,7 @@ class ChatBackend(ABC):
                 summarize_prompt: str = None,
                 jailbreak_prompt: str = None,
                 bot_name: str = "Luna",
-                db_path: str = "chat_history.db",
+                db_path: str = "data/chat_history.db",
                 max_tool_calls: int = 8):
         self.context_limit = context_limit
         self.context_keep = context_keep

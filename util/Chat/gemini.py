@@ -17,7 +17,7 @@ class GeminiBackend(ChatBackend):
                 summarize_prompt: str = None,
                 jailbreak_prompt: str = None,
                 bot_name: str = "Luna",
-                db_path: str = "chat_history.db"):
+                db_path: str = "data/chat_history.db"):
         super().__init__(context_limit, context_keep=context_keep, system_prompt=system_prompt, summarize_prompt=summarize_prompt, jailbreak_prompt=jailbreak_prompt, bot_name=bot_name, db_path=db_path)
         
         http_options = None
@@ -105,7 +105,7 @@ class GeminiBackend(ChatBackend):
 
         config = genai.types.GenerateContentConfig(**config_kwargs)
 
-        print(full_prompt)
+        # print(full_prompt)
         return await self.client.aio.models.generate_content(
             model=self.model, contents=full_prompt, config=config
         )
