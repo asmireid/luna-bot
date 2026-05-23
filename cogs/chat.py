@@ -43,7 +43,7 @@ class Chat(commands.Cog):
         files = []
         if ctx.message.attachments:
             for attachment in ctx.message.attachments:
-                mime_type = attachment.content_type or mimetypes.guess_type(attachment.filename)[0]
+                mime_type = attachment.content_type or mimetypes.guess_type(attachment.filename)[0]  # Discord Attachment uses content_type, normalise to mime_type
                 if not mime_type:
                     mime_type = "application/octet-stream"
                 data = await attachment.read()

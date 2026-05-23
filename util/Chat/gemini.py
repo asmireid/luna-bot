@@ -1,8 +1,10 @@
 import asyncio
+import io
 import json
 import requests
 
 from typing import List, Dict, Optional, Tuple, Any
+from PIL import Image
 from google import genai
 from google.genai import types
 from .base import ChatBackend
@@ -40,10 +42,114 @@ class GeminiBackend(ChatBackend):
         self.client = genai.Client(api_key=api_key, http_options=http_options)
         self.model = model
 
+    # ------------------------------------------------------------------
+    # payload helpers
+    # ------------------------------------------------------------------
+    _MAX_WIRE_BYTES = 10 * 1024 * 1024   # 10 MiB — safe for most proxies
+    _BASE64_RATIO = 4.0 / 3.0            # raw → base64 inflates by ~33 %
+    _JPEG_QUALITY = 85
+    _MIN_COMPRESS_BYTES = 50 * 1024      # skip tiny images
+
+    @staticmethod
+    def _compress_for_wire(data: bytes, mime_type: str) -> tuple[bytes, str]:
+        """Re-encode *data* as JPEG to shrink wire payload.  No-op for
+        JPEGs and images below ``_MIN_COMPRESS_BYTES``."""
+        if len(data) < GeminiBackend._MIN_COMPRESS_BYTES:
+            return data, mime_type
+        if mime_type and mime_type.split("/")[-1].lower() in ("jpeg", "jpg"):
+            return data, mime_type
+        try:
+            img = Image.open(io.BytesIO(data))
+            if img.mode in ("RGBA", "LA", "P"):
+                img = img.convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=GeminiBackend._JPEG_QUALITY)
+            result = buf.getvalue()
+            if len(result) < len(data):
+                return result, "image/jpeg"
+        except Exception:
+            pass
+        return data, mime_type
+
+    @staticmethod
+    def _estimate_text_wire(
+        system_prompt: str | None,
+        memory: str | None,
+        jailbreak_prompt: str | None,
+        entries: list[dict[str, Any]],
+        tool_schemas: list[dict] | None,
+    ) -> int:
+        """Conservative estimate of how many bytes the text/JSON parts
+        of the request will consume on the wire."""
+        est = 0
+        est += len(system_prompt or "")
+        est += len(memory or "")
+        est += len(jailbreak_prompt or "")
+        for e in entries:
+            est += len(e.get("text", ""))
+            est += len(e.get("name", ""))
+            est += 150  # JSON structure overhead per entry
+        if tool_schemas:
+            est += len(json.dumps(tool_schemas))
+        est += 4096  # fixed overhead: field names, brackets, config, labels
+        return est
+
     async def _generate_reply(self, context: Optional[List[Dict[str, Any]]] = None, use_system_prompt:bool = True, **kwargs) -> Any:
         asset_store = kwargs.get("asset_store")
         entries = await self.resolve_context_entries(context, asset_store)
 
+        # ------------------------------------------------------------------
+        # Step 1 – compress all candidate images to JPEG so we push fewer
+        #          bytes through the proxy / Gemini REST API.
+        # ------------------------------------------------------------------
+        for e in entries:
+            for img in e.get("images", []):
+                data = img.get("data", b"")
+                if data:
+                    compressed, new_mime = self._compress_for_wire(data, img.get("mime_type", ""))
+                    img["data"] = compressed
+                    img["mime_type"] = new_mime
+
+        # ------------------------------------------------------------------
+        # Step 2 – estimate how much of the wire budget text will eat.
+        #          Remaining budget is available for (base64-encoded) images.
+        # ------------------------------------------------------------------
+        tool_schemas = kwargs.get("tools")
+        text_wire = self._estimate_text_wire(
+            self.system_prompt, self.memory, self.jailbreak_prompt,
+            entries, tool_schemas,
+        )
+        image_wire_budget = max(0, self._MAX_WIRE_BYTES - text_wire)
+
+        # ------------------------------------------------------------------
+        # Step 3 – walk backwards (newest first) and select images that fit
+        #          in the remaining wire budget, accounting for base64 bloat.
+        # ------------------------------------------------------------------
+        keep_img_keys: set[tuple[int, int]] = set()
+        wire_spent = 0
+        total_raw_bytes = 0
+
+        for i in range(len(entries) - 1, -1, -1):
+            e = entries[i]
+            if e["role"] not in ("tool_result", "user") or not e.get("images"):
+                continue
+            for j, img in enumerate(e["images"]):
+                raw = len(img.get("data", b""))
+                if raw == 0:
+                    continue
+                wire = int(raw * self._BASE64_RATIO)
+                if wire_spent + wire <= image_wire_budget:
+                    keep_img_keys.add((i, j))
+                    wire_spent += wire
+                    total_raw_bytes += raw
+                else:
+                    break
+            if wire_spent >= image_wire_budget:
+                break
+
+        # ------------------------------------------------------------------
+        # Step 4 – build the full prompt (same structure; uses keep_img_keys)
+        # ------------------------------------------------------------------
         full_prompt: list[dict[str, Any]] = []
 
         if self.memory:
@@ -51,31 +157,6 @@ class GeminiBackend(ChatBackend):
                 "role": "model",
                 "parts": [types.Part.from_text(text=f"Memory: {self.memory}")],
             })
-
-        # Cap *all* image payload at ~20 MB so neither user attachments
-        # nor repeated paint calls blow past Gemini's request limit (or
-        # the proxy's limit).  We walk backwards (newest first) and
-        # embed bytes while budget remains; older images get text labels.
-        IMAGE_BUDGET_BYTES = 20 * 1024 * 1024  # 20 MiB
-        keep_img_keys: set[tuple[int, int]] = set()  # (entry_idx, img_idx)
-        spent = 0
-        for i in range(len(entries) - 1, -1, -1):
-            e = entries[i]
-            if e["role"] not in ("tool_result", "user") or not e.get("images"):
-                continue
-            for j, img in enumerate(e["images"]):
-                size = len(img.get("data", b""))
-                if size == 0:
-                    continue
-                if spent + size <= IMAGE_BUDGET_BYTES:
-                    keep_img_keys.add((i, j))
-                    spent += size
-                else:
-                    break  # budget exhausted for this entry
-            if spent >= IMAGE_BUDGET_BYTES:
-                break
-
-        total_img_bytes = 0  # for debug logging
 
         for i, e in enumerate(entries):
             role = e["role"]
@@ -89,12 +170,11 @@ class GeminiBackend(ChatBackend):
                     types.Part.from_function_response(name=e["name"], response={"result": e["text"]})
                 ]
                 for j, img in enumerate(e["images"]):
-                    size = len(img.get("data", b""))
+                    raw = len(img.get("data", b""))
                     if (i, j) in keep_img_keys:
                         parts.append(types.Part.from_bytes(data=img["data"], mime_type=img["mime_type"]))
-                        total_img_bytes += size
                     else:
-                        label = f"[Tool output image ({size // 1024} KB — omitted; {spent // (1024*1024)} MB image budget)]"
+                        label = f"[Tool output image ({raw // 1024} KB — omitted; budget exhausted)]"
                         parts.append(types.Part.from_text(text=label))
                 full_prompt.append({"role": "user", "parts": parts})
 
@@ -102,9 +182,12 @@ class GeminiBackend(ChatBackend):
                 if e.get("raw"):
                     raw = e["raw"]
                     parts = raw if isinstance(raw, list) else [raw]
+                    # strip thought parts to reduce payload size
+                    parts = [p for p in parts if not getattr(p, 'thought', False)]
                 else:
                     parts = [types.Part.from_text(text=e["text"])]
-                full_prompt.append({"role": "model", "parts": parts})
+                if parts:
+                    full_prompt.append({"role": "model", "parts": parts})
 
             else:  # user
                 parts = [types.Part.from_text(text=f"[User: {e['name']}]\n{e['text']}")]
@@ -112,26 +195,23 @@ class GeminiBackend(ChatBackend):
                     label = f"[Attached file: {f['filename']}; asset_id={f['asset_id']}; mime_type={f['mime_type']}]"
                     parts.append(types.Part.from_text(text=label))
                 for j, img in enumerate(e["images"]):
-                    size = len(img.get("data", b""))
+                    raw = len(img.get("data", b""))
                     if (i, j) in keep_img_keys:
                         parts.append(types.Part.from_bytes(data=img["data"], mime_type=img["mime_type"]))
-                        total_img_bytes += size
                     else:
-                        label = f"[Attached image ({size // 1024} KB — omitted; {spent // (1024*1024)} MB image budget)]"
+                        label = f"[Attached image ({raw // 1024} KB — omitted; budget exhausted)]"
                         parts.append(types.Part.from_text(text=label))
                 full_prompt.append({"role": "user", "parts": parts})
 
-        # Log approximate payload size so we can correlate with
-        # proxy-level errors like "failed to read request body".
-        text_chars = sum(
-            len(str(p.text)) if hasattr(p, 'text') and p.text else 0
-            for entry in full_prompt
-            for p in (entry["parts"] if isinstance(entry.get("parts"), list) else [])
-        )
+        # ------------------------------------------------------------------
+        # logging
+        # ------------------------------------------------------------------
         print(
-            f"Chat: sending ~{text_chars} chars text + "
-            f"{total_img_bytes // 1024} KB images = "
-            f"~{(text_chars + total_img_bytes) // 1024} KB total"
+            f"Chat: {len(keep_img_keys)} images ({total_raw_bytes // 1024} KB raw, "
+            f"{wire_spent // 1024} KB wire), "
+            f"~{text_wire // 1024} KB text → "
+            f"~{(text_wire + wire_spent) // 1024} KB total "
+            f"(budget {self._MAX_WIRE_BYTES // (1024 * 1024)} MB)"
         )
 
         if self.jailbreak_prompt:
@@ -140,7 +220,6 @@ class GeminiBackend(ChatBackend):
                 "parts": [types.Part.from_text(text=self.jailbreak_prompt)],
             })
 
-        tool_schemas = kwargs.get("tools")
         genai_tools = [{"function_declarations": tool_schemas}] if tool_schemas else None
 
         config_kwargs = {
@@ -155,7 +234,6 @@ class GeminiBackend(ChatBackend):
 
         config = genai.types.GenerateContentConfig(**config_kwargs)
 
-        print(full_prompt)
         return await self.client.aio.models.generate_content(
             model=self.model, contents=full_prompt, config=config
         )

@@ -275,7 +275,7 @@ class ChatBackend(ABC):
                     resolved.append({
                         'asset_id': item.asset_id,
                         'filename': item.filename,
-                        'content_type': item.mime_type,
+                        'mime_type': item.mime_type,
                         'kind': item.kind,
                     })
                     continue
@@ -283,7 +283,7 @@ class ChatBackend(ABC):
                 resolved.append({
                     'asset_id': item.asset_id,
                     'filename': item.filename,
-                    'content_type': item.mime_type,
+                    'mime_type': item.mime_type,
                     'kind': item.kind,
                     'data': data,
                 })
@@ -293,7 +293,7 @@ class ChatBackend(ABC):
             asset_id = normalized.get('asset_id')
             if asset_id and 'data' not in normalized and asset_store is not None:
                 normalized['data'] = await asset_store.resolve_bytes(asset_id)
-            normalized.setdefault('kind', 'image' if str(normalized.get('content_type', '')).startswith('image/') else 'file')
+            normalized.setdefault('kind', 'image' if str(normalized.get('mime_type', '')).startswith('image/') else 'file')
             resolved.append(normalized)
 
         return resolved
@@ -313,13 +313,13 @@ class ChatBackend(ABC):
             images: list[dict[str, Any]] = []
             other: list[dict[str, Any]] = []
             for f in files:
-                ct = f.get("content_type", "")
-                if ct.startswith("image/") and f.get("data"):
-                    images.append({"data": f["data"], "mime_type": ct})
+                mt = f.get("mime_type", "")
+                if mt.startswith("image/") and f.get("data"):
+                    images.append({"data": f["data"], "mime_type": mt})
                 else:
                     other.append({
                         "filename": f.get("filename", ""),
-                        "mime_type": ct,
+                        "mime_type": mt,
                         "asset_id": f.get("asset_id", ""),
                     })
             entries.append({

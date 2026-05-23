@@ -62,7 +62,7 @@ class Paint(commands.Cog):
                     input_files.append({
                         'filename': attachment.filename,
                         'data': file_data,
-                        'content_type': attachment.content_type
+                        'content_type': attachment.content_type  # Discord Attachment uses content_type
                     })
                 except discord.HTTPException as e:
                     logging.error(f"Failed to download attachment {attachment.filename}: {e}")
